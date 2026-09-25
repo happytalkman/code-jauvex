@@ -4,7 +4,7 @@ name: windows
 on:
   push:
     branches: ['claude/**', 'master']
-    paths: ['electron/claw.ts', 'electron/zcode.ts', 'scripts/windows-start.ps1', 'scripts/voice-setup.ts', 'electron/web.ts', 'electron/voice.ts', 'shared/web.ts', 'package.json', '.github/workflows/windows.yml']
+    paths: ['electron/claw.ts', 'electron/zcode.ts', 'scripts/windows-start.ps1', 'scripts/voice-setup.ts', 'electron/web.ts', 'electron/voice.ts', 'shared/web.ts', 'scripts/paperclip.ts', 'shared/paperclip.ts', 'shared/cli-json.ts', 'scripts/browse.ts', 'shared/browse.ts', 'scripts/graph.ts', 'package.json', '.github/workflows/windows.yml']
   workflow_dispatch:
 jobs:
   web:
