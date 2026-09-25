@@ -4,7 +4,7 @@ name: windows
 on:
   push:
     branches: ['claude/**', 'master']
-    paths: ['scripts/windows-start.ps1', 'scripts/voice-setup.ts', 'electron/web.ts', 'electron/voice.ts', 'shared/web.ts', 'package.json', '.github/workflows/windows.yml']
+    paths: ['scripts/zcode-setup.ps1', 'electron/zcode.ts', 'scripts/windows-start.ps1', 'scripts/voice-setup.ts', 'electron/web.ts', 'electron/voice.ts', 'shared/web.ts', 'package.json', '.github/workflows/windows.yml']
   workflow_dispatch:
 jobs:
   web:
@@ -75,3 +75,34 @@ jobs:
             Write-Host '--- server log'; Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 40
           }
           if ($fails) { throw "$fails FAILED" } else { Write-Host 'ALL PASS' }
+  zcode:
+    # ZCode (github.com/zai-org/ZCode) on Windows: its CLI built from source (Node 24, pnpm), then `zcode app-server` answering the
+    # ZCode Protocol, as the app starts it.
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Build the ZCode CLI
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          corepack enable; corepack prepare pnpm@10.33.2 --activate; pnpm -v
+          $zc = Join-Path $env:RUNNER_TEMP 'zcode'; git clone --depth 1 https://github.com/zai-org/ZCode $zc; Set-Location $zc
+          pnpm install --frozen-lockfile --filter "@zcode/cli..."; if ($LASTEXITCODE) { throw 'pnpm install failed' }
+          pnpm --filter "@zcode/cli..." build; if ($LASTEXITCODE) { throw 'build failed' }
+          $cli = Join-Path $zc 'apps\zcode-cli\packages\cli\dist\zcode.cjs'; node $cli --version; if ($LASTEXITCODE) { throw 'zcode --version failed' }
+          Get-ChildItem (Split-Path $cli) | Select-Object -First 20 Name, Length
+      - name: zcode app-server answers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cli = Join-Path $env:RUNNER_TEMP 'zcode\apps\zcode-cli\packages\cli\dist\zcode.cjs'
+          $psi = New-Object System.Diagnostics.ProcessStartInfo 'node', "`"$cli`" app-server"; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.UseShellExecute = $false
+          $p = [System.Diagnostics.Process]::Start($psi)
+          # no initialize: the server prints its startup notifications, then takes requests (electron/zcode.ts)
+          $p.StandardInput.WriteLine('{"id":1,"method":"session/list","params":{}}'); $p.StandardInput.Flush()
+          $ok = $false; $deadline = (Get-Date).AddSeconds(90)
+          while ((Get-Date) -lt $deadline) { $t = $p.StandardOutput.ReadLineAsync(); if (-not $t.Wait(30000) -or $null -eq $t.Result) { break }; $line = $t.Result; Write-Host "< $($line.Substring(0, [Math]::Min(300, $line.Length)))"; if ($line -match '"id":1\b') { $ok = $true; break } }
+          if (-not $ok) { Write-Host 'FAIL no answer to session/list' }
+          $p.Kill(); Write-Host '--- stderr'; $p.StandardError.ReadToEnd() | Select-Object -Last 20; if (-not $ok) { throw 'zcode app-server did not answer' }
