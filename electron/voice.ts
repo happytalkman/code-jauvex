@@ -9,6 +9,7 @@ import { withAppWords } from '../shared/types.js';
 import { wakeMatch } from '../shared/transcript.js';
 import { JEV_MIN_CONFIDENCE, orderVerdict } from '../shared/orders.js';
 import * as codex from './codex.js';
+import * as zcode from './zcode.js';
 import { DATA_DIR } from './paths.js';
 import * as jev from './jev.js';
 import * as debug from './debug.js';
@@ -282,9 +283,9 @@ export async function claudeModels(): Promise<{ id: string; label: string }[]> {
   if (!claudeModelsPending) claudeModelsPending = (async () => { const s = voiceSession ?? openVoice(resolveVoiceModel('claude', '')); try { const list = await s.q.supportedModels(); claudeModelCache = list.map((m) => ({ id: m.value, label: m.displayName || m.value, resolved: m.resolvedModel })); debug.log('note', `Claude models on this account: ${claudeModelCache.map((m) => m.id).join(', ')}`, { by: 'app' }); } catch (e) { debug.log('note', `could not list Claude models: ${(e as Error).message}`, { by: 'app' }); } finally { if (s !== voiceSession) s.close(); claudeModelsPending = null; } })();
   await claudeModelsPending; return claudeModelCache ?? [];
 }
-/** The model the voice really uses for a provider, given the preference ('' = automatic, the smallest). Claude here; Codex resolves in its own module. */
+/** The model the voice really uses for a provider, given the preference ('' = automatic, the smallest). Claude here; Codex and ZCode resolve in their own modules. */
 export function resolveVoiceModel(provider: Provider, preferred: string): string {
-  if (provider === 'codex') return preferred;
+  if (provider !== 'claude') return preferred;
   const list = (claudeModelCache ?? []).filter((m) => !badModels.has(m.id) && !badModels.has(m.resolved ?? ''));
   if (preferred && !badModels.has(preferred) && (!claudeModelCache || list.some((m) => m.id === preferred || m.resolved === preferred))) return preferred;
   if (list.length) return [...list].sort((a, b) => rank(a.id, a.label) - rank(b.id, b.label))[0]!.id;
@@ -334,6 +335,7 @@ function pump(model: string): void {
   s.push(next.message);
 }
 function ask(message: string, provider: Provider, model: string, timeoutMs: number): Promise<string> {
+  if (provider === 'zcode') { const t0 = Date.now(); const kind = /^(HEARD|BUSY|DONE|COMMAND):/m.exec(message)?.[1] ?? 'OTHER'; return zcode.voiceAsk(VOICE_PROMPT, message, model, timeoutMs + 1500).then(async (t) => { const used = await zcode.voiceModel(model); debug.log('model', `voice model (ZCode ${used || 'none: no ZCode model known yet'}): ${kind} -> ${JSON.stringify(t.slice(0, 160))}`, { by: 'voice model', ms: Date.now() - t0, detail: `SENT\n${message}\n\nREPLY\n${t || '(nothing)'}` }); return t; }); } // a ZCode session speaks through a ZCode model, one question at a time
   if (provider === 'codex') { const t0 = Date.now(); const kind = /^(HEARD|BUSY|DONE|COMMAND):/m.exec(message)?.[1] ?? 'OTHER'; return codex.voiceAsk(VOICE_PROMPT, message, model, timeoutMs + 1500).then(async (t) => { const used = await codex.voiceModel(model).catch(() => model); debug.log('model', `voice model (Codex ${used || model || 'default'}): ${kind} -> ${JSON.stringify(t.slice(0, 160))}`, { by: 'voice model', ms: Date.now() - t0, detail: `SENT\n${message}\n\nREPLY\n${t || '(nothing)'}` }); return t; }); } // a Codex session speaks through a Codex model (it has its own one-at-a-time queue)
   const kind = /^(HEARD|BUSY|DONE):/m.exec(message)?.[1] ?? 'OTHER';
   return new Promise<string>((resolve) => {
@@ -347,6 +349,7 @@ function ask(message: string, provider: Provider, model: string, timeoutMs: numb
 export function warmAck(provider: Provider, model: string): void {
   jev.warm();
   if (provider === 'codex') { codex.voiceWarm(VOICE_PROMPT, model); return; }
+  if (provider === 'zcode') { zcode.voiceWarm(); return; }
   const use = resolveVoiceModel('claude', model); void claudeModels(); /* the list lands once; the next warm-up re-resolves against it */
   if (!voiceSession || voiceSession.model !== use) { voiceSession?.close(); voiceSession = openVoice(use); }
 }
@@ -466,6 +469,7 @@ type Details = { kind?: 'claude' | 'codex' | 'jev' | null; name?: string | null;
 async function oneShot(provider: Provider, model: string | undefined, prompt: string, timeoutMs: number): Promise<string> {
   const run = async (): Promise<string> => {
     if (provider === 'codex') return codex.runOnce(prompt, model ? { model } : {});
+    if (provider === 'zcode') return zcode.runOnce(prompt, model);
     let text = '';
     for await (const m of query({ prompt, options: { ...claudeExe(), ...(model ? { model } : {}), settingSources: [], tools: [], mcpServers: {}, strictMcpConfig: true, persistSession: false, thinking: { type: 'disabled' }, cwd: os.tmpdir(), systemPrompt: 'You answer with the JSON asked for and nothing else.' } })) {
       if (m.type === 'assistant') text += (m.message.content as { type: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
@@ -630,9 +634,9 @@ export async function setupCheck(): Promise<SetupCheck> { if (process.env.CVC_SE
 async function voiceQuality(): Promise<SetupCheck['voice']> {
   try { const [a, b] = await Promise.all([speak('Hi.', '', 185), speak('Hi.', 'Samantha', 185)]); if (!a || !b) return 'unknown'; if (a.byteLength !== b.byteLength) return 'natural'; const x = new Uint8Array(a), y = new Uint8Array(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return 'natural'; return 'basic'; } catch { return 'unknown'; }
 }
-export async function status(): Promise<VoiceStatus> { return { jev: await jev.available(), jevKey: await jev.hasKey(), whisper: whisperState, detail: whisperDetail, voices: await voices(), models: listModels(), model: whisperDetail.endsWith('.bin') ? whisperDetail : '', voiceModels: { claude: (claudeModelCache ?? []).map(({ id, label, resolved }) => ({ id, label, ...(resolved ? { resolved } : {}) })), codex: (await codex.models().catch(() => [])).map(({ id, label }) => ({ id, label })) } }; }
+export async function status(): Promise<VoiceStatus> { return { jev: await jev.available(), jevKey: await jev.hasKey(), whisper: whisperState, detail: whisperDetail, voices: await voices(), models: listModels(), model: whisperDetail.endsWith('.bin') ? whisperDetail : '', voiceModels: { claude: (claudeModelCache ?? []).map(({ id, label, resolved }) => ({ id, label, ...(resolved ? { resolved } : {}) })), codex: (await codex.models().catch(() => [])).map(({ id, label }) => ({ id, label })), zcode: (await zcode.models().catch(() => [])).map(({ id, label }) => ({ id, label })) } }; }
 /** The model the voice would use now for a provider and a preference (for the settings' "in use" line). */
-export async function voiceModelInUse(provider: Provider, preferred: string): Promise<string> { if (provider === 'codex') return codex.voiceModel(preferred).catch(() => preferred); await claudeModels().catch(() => undefined); return resolveVoiceModel('claude', preferred); }
+export async function voiceModelInUse(provider: Provider, preferred: string): Promise<string> { if (provider === 'codex') return codex.voiceModel(preferred).catch(() => preferred); if (provider === 'zcode') return zcode.voiceModel(preferred); await claudeModels().catch(() => undefined); return resolveVoiceModel('claude', preferred); }
 export function shutdown(): void { cancelSpeech(); voiceSession?.close(); voiceSession = null; if (whisper) { whisper.kill('SIGTERM'); whisper = null; } if (live) { live.kill('SIGTERM'); live = null; } }
 
 /** What someone said to the welcome screen: start, pick Claude, pick Codex, or something else. Jev first, the words alone after.

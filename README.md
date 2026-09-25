@@ -512,16 +512,22 @@ Press the white round button in the message box. All local except the two Claude
 - ZCode sessions (a third provider, first cut) come from **`zcode app-server`** (`electron/zcode.ts`): the ZCode Protocol that
   ZCode's own desktop app runs its agent with ([github.com/zai-org/ZCode](https://github.com/zai-org/ZCode), read at v3.14.3), one JSON
   object per line over stdio. `session/list` for the folder, `session/create` / `session/resume`, `session/subscribe` (the turn's events
-  only reach a subscribed client), `session/send`, `session/stop`, `session/compact`, `session/messages`, and the host's
-  `interaction/requestPermission`, shown as the usual permission card. Same config, providers and session store as the ZCode CLI
+  only reach a subscribed client), `session/send`, `session/stop`, `session/compact`, `session/messages`, `session/read` (how full the
+  context is, read when a turn ends, for the meter), and the host's `interaction/requestPermission`, shown as the usual permission card. Same config, providers and session store as the ZCode CLI
   (`~/.zcode`), nothing there parsed by hand; the binary is the `zcode` on the PATH (`CVC_ZCODE_BIN` points elsewhere, the checks at
   `tests/mock/zcode`). Its limits, as that protocol has them: no system prompt per session, so the app's briefing goes in front of a new
-  session's first message, marked, and is cut off again when the transcript is shown; a message during a ZCode turn is refused, so it
-  waits in the queue and goes when the turn ends (no steering); the permission choice maps to ZCode's modes (ask: `build`; auto: `edit`,
+  session's first message, marked, and is cut off again when the transcript is shown; `session/send` is refused during a turn, so what is
+  said or sent to a working ZCode agent goes as ZCode's v4 `sendText` command asking to be folded into the running turn (`guide`); ZCode
+  may queue it as a turn of its own after this one instead, and the chat then stays open until that turn is over too (text only: with
+  images, or when ZCode does not accept the command, it waits in the window's queue); the permission choice maps to ZCode's modes (ask: `build`; auto: `edit`,
   which edits on its own and still asks before commands; ZCode's own `auto` refuses every tool and is never sent); models are ZCode's
   default, or `provider/model` from its config; ZCode's account models need headers its desktop host supplies, so here it runs on
-  providers configured with an API key. Not there yet: images, renaming, the model list, the context meter, the usage battery, and a
-  ZCode voice model (the voice of a ZCode session is Claude's small model for now). "Signed in" means the `zcode` command answers.
+  providers configured with an API key. The voice of a ZCode session is a ZCode model: `workspace/generateText`, one request with no
+  session, nothing kept in ZCode's history, the model picked in the voice settings (`provider/model`) or else the model of the last ZCode
+  session here (the protocol lists no models, so the choices are the ones ZCode sessions ran on here). The server runs its requests one at
+  a time, so a voice line asked during a turn holds a steer for as long as it takes. ZCode says its `session/*` methods go once its v4
+  protocol is the only one: that update moves this file to `v4/*`. Not there yet: images, renaming, the usage battery.
+  "Signed in" means the `zcode` command answers.
   Checked in `tests/zcode-provider.test.ts`.
 - `electron/chat.ts` routes each turn by the session's provider; every provider sends the UI the same `ChatEvent`s.
 - Two threads per chat. The main thread is the session itself (Claude or Codex, the model in the picker). The voice

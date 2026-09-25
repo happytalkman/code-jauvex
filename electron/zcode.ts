@@ -5,24 +5,28 @@ import os from 'node:os';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { clientBriefing, type Attachment, type Block, type ChatEvent, type ChatMessage, type ChatStart, type ModelOption, type PermissionDecision, type SessionInfo } from '../shared/types.js';
-import { projectOr404, saveState } from './backend.js';
-import { tooLong } from '../shared/context.js';
+import { projectOr404, saveContext, saveState } from './backend.js';
+import { tooLong, type ContextUsage } from '../shared/context.js';
 
 /**
  * ZCode sessions, through `zcode app-server`: the ZCode Protocol (one JSON object per line over stdio, JSON-RPC shaped without the
  * `jsonrpc` field) that ZCode's own desktop app runs its agent with. Same config, providers and session store as the ZCode CLI
  * (~/.zcode), so nothing there is parsed by hand. One server process is started on first use and shared by every ZCode chat.
  * The protocol is ZCode's internal one (packages/shared/src/zcode-protocol in github.com/zai-org/ZCode, v3.14.3 read on
- * 2026-09-25): this file uses its session methods only, and the stand-in (tests/mock/zcode.ts) answers the same subset.
+ * 2026-09-25): this file uses its `session/*` methods, one `v4/command` (sendText, to steer) and `workspace/generateText` (the voice),
+ * and the stand-in (tests/mock/zcode.ts) answers the same subset. ZCode says its `session/*` methods go once its v4 protocol is the
+ * only one: when a ZCode update drops them, this file moves to `v4/*` (commands and conversation topics).
  *
  * What differs from Codex, as that protocol has it:
  *   - no `initialize`: the server takes requests once it is up (it first prints `startup/storageState` notifications);
  *   - requests run one after another on the server, but `session/send` answers as soon as the input is accepted; the turn then
  *     streams as `session/event` notifications, and only for a session this client subscribed to (`session/subscribe`);
- *   - a second `session/send` is refused while a turn runs, so a message said during a turn waits in the window's queue (steerChat
- *     answers false) instead of joining the running turn;
+ *   - a second `session/send` is refused while a turn runs: a message said during a turn goes as a v4 `sendText` command asking to be
+ *     folded into the running turn (`requestedDelivery: guide`); ZCode may queue it instead, as a turn of its own after this one, and the
+ *     chat then stays open until that turn is over too (LiveTurn.steers);
  *   - no per-session system prompt: the app's briefing goes in front of a new session's first message, marked, and is cut off
  *     again when the transcript is shown (BRIEFING_OPEN);
+ *   - how full the context is comes from the session's snapshot (`session/read`: runtime.contextUsage), read when a turn ends;
  *   - models the host signs in for (ZCode's own account) need the host to supply request headers; this client does not, so ZCode
  *     sessions here run on providers configured with an API key in ZCode's config.
  */
@@ -68,7 +72,7 @@ export function version(): Promise<string | null> {
     const timer = setTimeout(() => { c.kill(); resolve(null); }, 10_000);
     c.stdout?.on('data', (d: Buffer) => { out += d.toString(); }); c.on('error', () => { clearTimeout(timer); resolve(null); }); c.on('exit', (code) => { clearTimeout(timer); resolve(code === 0 ? out.trim().split('\n')[0] ?? '' : null); }); });
 }
-export function shutdown(): void { const s = server; server = null; s?.child.kill('SIGTERM'); }
+export function shutdown(): void { const s = server; server = null; loaded.clear(); subscribed.clear(); s?.child.kill('SIGTERM'); } // the next server process knows none of them
 
 // ---------- protocol shapes (the subset this app reads)
 type Workspace = { workspacePath: string; workspaceKey: string; workspaceIdentity?: string };
@@ -80,6 +84,9 @@ export type ZMessage = { info: { messageId: string; role: 'user' | 'assistant'; 
 type Snapshot = { session: SessionRow; messages: ZMessage[] };
 type ZEvent = { sessionId: string; turnId?: string; type: string; payload?: Record<string, unknown> };
 
+/** The models ZCode sessions ran on here, "provider/model", newest first: ZCode has no list of its own in this protocol. */
+const seen: string[] = []; let lastDir = '';
+const saw = (m?: Selection): string | undefined => { if (!m) return undefined; const id = `${m.providerId}/${m.modelId}`; const i = seen.indexOf(id); if (i >= 0) seen.splice(i, 1); seen.unshift(id); return id; };
 /** A folder in the protocol's terms: a local folder is its own key (ZCode's buildWorkspaceRef). */
 const workspace = (dir: string): Workspace => ({ workspacePath: dir, workspaceKey: dir });
 
@@ -118,7 +125,7 @@ const loaded = new Set<string>();     // sessions this server process has create
 const subscribed = new Set<string>(); // ... and streams the events of
 async function load(sessionId: string, dir?: string): Promise<void> {
   if (loaded.has(sessionId)) return;
-  await call('session/resume', { sessionId, ...(dir ? { workspace: workspace(dir) } : {}) }); loaded.add(sessionId);
+  const snap = await call<Snapshot>('session/resume', { sessionId, ...(dir ? { workspace: workspace(dir) } : {}) }); loaded.add(sessionId); saw(snap?.session?.model);
 }
 export async function transcript(sessionId: string, dir?: string): Promise<ChatMessage[]> {
   await load(sessionId, dir);
@@ -127,12 +134,17 @@ export async function transcript(sessionId: string, dir?: string): Promise<ChatM
 }
 /** The protocol this app speaks has no rename: the name stays ZCode's (its first message, or the title it generated). */
 export async function rename(): Promise<void> { throw new Error('ZCode sessions cannot be renamed from this app yet.'); }
-/** ZCode's models are the providers in its own config; the composer keeps "Default model", or takes "provider/model". */
-export async function models(): Promise<ModelOption[]> { return []; }
+/** ZCode's models are the providers in its own config; this protocol lists none, so these are the ones its sessions ran on here. */
+export async function models(): Promise<ModelOption[]> { return seen.map((id) => ({ id, label: id })); }
 export const selection = (model?: string): Selection | undefined => { const i = model ? model.indexOf('/') : -1; return model && i > 0 && i < model.length - 1 ? { providerId: model.slice(0, i), modelId: model.slice(i + 1) } : undefined; };
 
 // ---------- one turn, streamed to the UI with the same events the Claude and Codex paths send
-type LiveTurn = { projectId?: string; chatId: string; sessionId: string; turnId: string | null; userMessages: Set<string>; send: (e: ChatEvent) => void; pending: Map<string, (d: PermissionDecision) => void>; compact: boolean; fail: (why: string) => void; finish: (ok: boolean, error?: string, durationMs?: number) => void };
+// steers: the messages handed to this turn (by command id) that ZCode has not folded in yet; queued ones become a turn of their own after
+// this one, and the chat stays open until it is over. pendingOf: ZCode's queue id -> our command id.
+type LiveTurn = { projectId?: string; chatId: string; sessionId: string; turnId: string | null; userMessages: Set<string>; send: (e: ChatEvent) => void; pending: Map<string, (d: PermissionDecision) => void>; compact: boolean; model?: string;
+  steers: Set<string>; pendingOf: Map<string, string>; stopping: boolean; wait: ReturnType<typeof setTimeout> | null; fail: (why: string) => void; finish: (ok: boolean, error?: string, durationMs?: number) => void };
+/** How long a turn that ended with messages still queued behind it waits for the turn they start. */
+const QUEUED_TURN_MS = 5_000; // ZCode starts a queued input as soon as the turn before it ends
 const turns = new Map<string, LiveTurn>(); // by sessionId: ZCode runs one turn per session at a time
 
 export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): Promise<void> {
@@ -146,24 +158,26 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   let sessionId = req.sessionId; let text = req.text; let model: string | undefined;
   if (!sessionId) {
     const snap = await call<Snapshot>('session/create', { workspace: workspace(project.path), mode, persistence: 'immediate', titleGenerationEnabled: true, ...(selection(req.model) ? { model: selection(req.model) } : {}) });
-    sessionId = snap.session.sessionId; loaded.add(sessionId); model = snap.session.model ? `${snap.session.model.providerId}/${snap.session.model.modelId}` : undefined;
+    sessionId = snap.session.sessionId; loaded.add(sessionId); model = saw(snap.session.model);
     text = withBriefing(clientBriefing(!!req.voice, req.vocabulary, !!req.steward, APP_ROOT), text); // every session is told where it is running
   } else await load(sessionId, project.path);
+  lastDir = project.path; model ??= req.model || seen[0];
   if (turns.has(sessionId)) throw new Error('This session is already running a turn.');
   if (!subscribed.has(sessionId)) { await call('session/subscribe', { sessionId, deliveryKind: 'desktop-continuous' }); subscribed.add(sessionId); }
   if (!req.hidden && !project.sessions.includes(sessionId)) project.sessions.unshift(sessionId);
   if (project.providers?.[sessionId] !== 'zcode') { project.providers = { ...project.providers, [sessionId]: 'zcode' }; await saveState(state); }
   send({ chatId, type: 'init', sessionId, ...(model ? { model } : {}) });
   if (req.images?.length) send({ chatId, type: 'status', text: 'Images are not passed to ZCode sessions yet: only the text went.' });
-  await runTurn(sessionId, chatId, req.compact ? '' : text, send, req.projectId, !!req.compact);
+  await runTurn(sessionId, chatId, req.compact ? '' : text, send, req.projectId, !!req.compact, model);
 }
 
-function runTurn(id: string, chatId: string, text: string, send: (e: ChatEvent) => void, projectId: string | undefined, compact: boolean): Promise<void> {
+function runTurn(id: string, chatId: string, text: string, send: (e: ChatEvent) => void, projectId: string | undefined, compact: boolean, model?: string): Promise<void> {
   return new Promise<void>((resolve) => {
-    const end = (e: ChatEvent) => { for (const f of entry.pending.values()) f('deny'); turns.delete(id); if (entry.compact) send({ chatId, type: 'compact', phase: 'done', trigger: 'manual', ok: e.type === 'done' && e.ok }); send(e); resolve(); };
-    const entry: LiveTurn = { projectId, chatId, sessionId: id, turnId: null, userMessages: new Set(), send, pending: new Map(), compact,
+    let over = false;
+    const end = (e: ChatEvent) => { if (over) return; over = true; if (entry.wait) clearTimeout(entry.wait); for (const f of entry.pending.values()) f('deny'); turns.delete(id); if (entry.compact) send({ chatId, type: 'compact', phase: 'done', trigger: 'manual', ok: e.type === 'done' && e.ok }); send(e); resolve(); };
+    const entry: LiveTurn = { projectId, chatId, sessionId: id, turnId: null, userMessages: new Set(), send, pending: new Map(), compact, ...(model ? { model } : {}), steers: new Set(), pendingOf: new Map(), stopping: false, wait: null,
       fail: (why) => end({ chatId, type: 'done', ok: false, sessionId: id, error: why, ...(tooLong(null, why) ? { tooLong: true } : {}) }),
-      finish: (ok, error, durationMs) => end({ chatId, type: 'done', ok, sessionId: id, ...(durationMs ? { durationMs } : {}), ...(ok ? {} : { error: error || 'The turn failed.', ...(tooLong(null, error) ? { tooLong: true } : {}) }) }) };
+      finish: (ok, error, durationMs) => void readContext(entry).finally(() => end({ chatId, type: 'done', ok, sessionId: id, ...(durationMs ? { durationMs } : {}), ...(ok ? {} : { error: error || 'The turn failed.', ...(tooLong(null, error) ? { tooLong: true } : {}) }) })) };
     turns.set(id, entry);
     if (compact) send({ chatId, type: 'compact', phase: 'start', trigger: 'manual' });
     (compact ? call('session/compact', { sessionId: id }) : call('session/send', { sessionId: id, content: text }))
@@ -176,12 +190,16 @@ function runTurn(id: string, chatId: string, text: string, send: (e: ChatEvent) 
 function onEvent(ev: ZEvent): void {
   const t = turns.get(ev.sessionId); if (!t) return;
   const { chatId, send } = t; const p = ev.payload ?? {};
-  if (ev.type === 'turn.started') { t.turnId = ev.turnId ?? null; if (typeof p.messageId === 'string') t.userMessages.add(p.messageId); }
-  else if (ev.type === 'turn.steerDrained') for (const m of (p.injectedMessageIds as string[] | undefined) ?? []) t.userMessages.add(m);
+  if (ev.type === 'turn.started') { t.turnId = ev.turnId ?? null; if (typeof p.messageId === 'string') t.userMessages.add(p.messageId);
+    if (t.wait) { clearTimeout(t.wait); t.wait = null; } if (typeof p.inputId === 'string') t.steers.delete(p.inputId); } // a queued message starting its own turn: the chat goes on with it
+  else if (ev.type === 'turn.steerQueued') { if (typeof p.pendingInputId === 'string' && typeof p.inputId === 'string') t.pendingOf.set(p.pendingInputId, p.inputId); }
+  else if (ev.type === 'turn.steerDrained') { for (const m of (p.injectedMessageIds as string[] | undefined) ?? []) t.userMessages.add(m); // folded into the running turn
+    for (const q of [...((p.pendingInputIds as string[] | undefined) ?? []), ...((p.queryIds as string[] | undefined) ?? [])]) t.steers.delete(t.pendingOf.get(q) ?? q); }
   else if (ev.type === 'part.delta') { if ((p.field ?? 'text') === 'text' && !t.userMessages.has(String(p.messageId))) send({ chatId, type: 'delta', text: String(p.delta ?? '') }); }
   else if (ev.type === 'part.upserted') { const part = p.part as Part | undefined; if (!part || t.userMessages.has(part.messageId)) return; // the UI already shows what was typed
     const msg = normalizePart('assistant', part); if (msg) send({ chatId, type: 'message', message: msg }); }
-  else if (ev.type === 'turn.completed') { const result = String(p.resultType ?? 'success'); t.finish(result === 'success' || result === 'cancelled', result.replace(/^error_/, '').replace(/_/g, ' '), typeof p.duration === 'number' ? p.duration : undefined); }
+  else if (ev.type === 'turn.completed') { const result = String(p.resultType ?? 'success'); const done = () => t.finish(result === 'success' || result === 'cancelled', result.replace(/^error_/, '').replace(/_/g, ' '), typeof p.duration === 'number' ? p.duration : undefined);
+    if (t.steers.size && !t.stopping && result === 'success') { t.turnId = null; t.wait = setTimeout(done, QUEUED_TURN_MS); } else done(); } // a message queued behind this turn starts the next one
   else if (ev.type === 'turn.failed') t.finish(false, (p.error as { message?: string } | undefined)?.message);
 }
 
@@ -198,14 +216,59 @@ function onServerRequest(s: Server, id: number | string, method: string, p: Reco
 const byChat = (chatId: string): LiveTurn | undefined => [...turns.values()].find((t) => t.chatId === chatId);
 export function isRunning(chatId: string): boolean { return !!byChat(chatId); }
 export function liveList(): { chatId: string; projectId: string; sessionId: string | null }[] { return [...turns.values()].filter((t) => t.projectId).map((t) => ({ chatId: t.chatId, projectId: t.projectId!, sessionId: t.sessionId })); }
-/** ZCode refuses a message while a turn runs (session/send): the window keeps it and sends it when the turn ends. */
-export async function steerChat(_chatId: string, _text: string, _images?: Attachment[]): Promise<boolean> { return false; }
+const CLIENT_ID = `jauvex-${randomUUID()}`;
+/** A message for the running turn, as ZCode's v4 `sendText` asking to be folded in (guide). False (the window keeps it and sends it when
+ * the turn ends) when there is no turn, when it compacts, with images (ZCode folds in text only), or when ZCode does not accept it. */
+export async function steerChat(chatId: string, text: string, images?: Attachment[]): Promise<boolean> {
+  const t = byChat(chatId); if (!t || t.compact || t.stopping || images?.length || !text.trim()) return false;
+  const commandId = randomUUID(); t.steers.add(commandId);
+  try {
+    const ack = await call<{ status?: string }>('v4/command', { commandId, clientId: CLIENT_ID, sessionId: t.sessionId, type: 'sendText', payload: { text, requestedDelivery: 'guide' }, issuedAt: Date.now() });
+    if (ack?.status === 'accepted' || ack?.status === 'duplicate') return true;
+  } catch { /* an older or newer server without this command: the window queues it */ }
+  t.steers.delete(commandId); return false;
+}
 export function answerPermission(chatId: string, requestId: string, decision: PermissionDecision): boolean {
   const finish = byChat(chatId)?.pending.get(requestId); if (!finish) return false; finish(decision); return true;
 }
 export async function stopChat(chatId: string): Promise<boolean> {
-  const t = byChat(chatId); if (!t) return false;
+  const t = byChat(chatId); if (!t) return false; t.stopping = true;
+  if (!t.turnId && t.wait) { t.finish(true); return true; } // stopped between a turn and the one queued behind it
   try { await call('session/stop', { sessionId: t.sessionId }); } catch (e) { t.fail(`Stopped: ${(e as Error).message}`); }
   return true; // turn.completed (resultType cancelled) closes the chat
 }
 export function stopAll(): void { for (const t of turns.values()) void stopChat(t.chatId); }
+
+// ---------- how full the context is: the session's snapshot, read when a turn ends (T-74)
+type Snap = { runtime?: { contextUsage?: { used: number; size: number } } };
+/** ZCode's context usage -> the meter's: the tokens its next request carries, against the model's window. Pure. */
+export const zcodeUsage = (u: { used?: number; size?: number } | null | undefined, at: number): ContextUsage | null => (u && typeof u.used === 'number' && typeof u.size === 'number' && u.size > 0 ? { used: u.used, window: u.size, at } : null);
+async function readContext(t: LiveTurn): Promise<void> {
+  try {
+    const r = await Promise.race([call<Snap>('session/read', { sessionId: t.sessionId, messageLimit: 1 }), new Promise<null>((ok) => setTimeout(() => ok(null), 3000))]);
+    const u = zcodeUsage(r?.runtime?.contextUsage, Date.now()); if (!u) return;
+    const ctx = { ...u, ...(t.model ? { model: t.model } : {}) }; t.send({ chatId: t.chatId, type: 'context', usage: ctx });
+    if (t.projectId) await saveContext(t.projectId, t.sessionId, ctx);
+  } catch { /* no meter this time */ }
+}
+
+// ---------- the speaking voice of ZCode sessions: a ZCode model, so a ZCode session never talks through another provider
+// `workspace/generateText`: one request to the model, no session, nothing kept in ZCode's history, no tools. Asked one at a time; in the
+// folder of the last ZCode turn, so ZCode reuses that session's runtime instead of building one per question.
+let voiceQueue: Promise<unknown> = Promise.resolve();
+/** The voice model: the one picked in settings ("provider/model"), else the model of the last ZCode session here, else none. */
+export async function voiceModel(preferred: string): Promise<string> { return selection(preferred) ? preferred : seen[0] ?? ''; }
+async function generate(messages: { role: 'system' | 'user'; content: string }[], model: string, timeoutMs: number, maxOutputTokens: number): Promise<string> {
+  const sel = selection(model); if (!sel) return '';
+  const operationId = randomUUID(); const timer = setTimeout(() => void call('workspace/cancelGenerateText', { operationId }).catch(() => {}), timeoutMs);
+  try { const r = await call<{ text?: string }>('workspace/generateText', { workspace: workspace(lastDir || os.tmpdir()), selection: sel, messages, querySource: 'jauvex_voice', maxOutputTokens, operationId }); return (r?.text ?? '').replace(/\s+/g, ' ').trim(); }
+  finally { clearTimeout(timer); }
+}
+export function voiceAsk(instructions: string, message: string, preferred: string, timeoutMs: number): Promise<string> {
+  const job = voiceQueue.then(async () => generate([{ role: 'system', content: instructions }, { role: 'user', content: message }], await voiceModel(preferred), timeoutMs, 400)).catch(() => '');
+  voiceQueue = job; return job;
+}
+/** One throwaway request (the details of an order for the app): the model's text. */
+export async function runOnce(text: string, model?: string): Promise<string> { return generate([{ role: 'user', content: text }], await voiceModel(model ?? ''), 20_000, 800); }
+/** Nothing to warm but the server itself. */
+export function voiceWarm(): void { if (!server) server = boot(); }
