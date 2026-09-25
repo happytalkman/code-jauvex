@@ -4,6 +4,7 @@
 // Every call carries the token the server printed; it comes in the URL once, and is kept for this tab (sessionStorage).
 
 import type { Attachment } from '../../shared/types';
+import { externalOk } from '../../shared/opencut';
 import { packBinary, undefinedArgs, unpackBinary, type B64 } from '../../shared/web';
 
 // Base64 in the browser, in chunks (a recording is a few hundred KB; one String.fromCharCode call with all of it overflows the stack).
@@ -58,7 +59,7 @@ export function installWebDesktop(): void {
     onAccountEvent: on('account:event'),
     appRestart: async () => { await rpc('app:restart'); window.alert('The web server stopped. Start it again with: npm run web'); return true; },
     appReset: async () => { if (!window.confirm("Reset the app to its initial state? This deletes the app's own data (the folders and sessions in the sidebar, the Jauvex agent's conversation, every setting); the sessions themselves stay with their providers. The web server stops afterwards.")) return false; return rpc('app:reset'); },
-    openExternal: async (url) => { if (!/^https:\/\//.test(url)) return false; window.open(url, '_blank', 'noopener'); return true; },
+    openExternal: async (url) => { if (!externalOk(url)) return false; window.open(url, '_blank', 'noopener'); return true; },
     usage: (p, force) => rpc('usage:get', p, force),
     chatLive: () => rpc('chat:live'),
     appReload: async () => { location.reload(); return true; },

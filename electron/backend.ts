@@ -11,6 +11,7 @@ import { type JauvexEntry, JEV_TEMPLATE, providerOf, type SessionPrefs, type Jev
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import type { ContextUsage } from '../shared/context.js';
+import { opencutUrl } from '../shared/opencut.js';
 import * as jev from './jev.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -224,6 +225,7 @@ export const backend = {
     if (agent) { agent.state = stateText; agent.questions = questionsText; agent.runs = [run, ...agent.runs].slice(0, 20); agent.updatedAt = run.at; await saveState(state); }
     return run;
   },
+  opencutUp: async (url: string): Promise<boolean> => { try { const r = await fetch(opencutUrl(url), { signal: AbortSignal.timeout(2500), redirect: 'manual' }); return r.status > 0; } catch { return false; } }, // OpenCut answers there (any answer: it is running)
   models: async (provider: Provider): Promise<ModelOption[]> => (provider === 'codex' ? codex.models() : provider === 'zcode' ? zcode.models() : []), // Claude's list is fixed in the UI
 };
 export type Backend = typeof backend;

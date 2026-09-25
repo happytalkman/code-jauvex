@@ -51,7 +51,9 @@ IPC does not: the window says which arguments were undefined and the server rest
 showed an empty page. It listens on 127.0.0.1 only; every call needs the token of this run, and a request whose Host is not this machine's
 is refused (no other site reaches it by DNS tricks). One copy per data folder, like the desktop app: a lock (`web.lock`, with its pid) and
 no start while the desktop app holds that folder. `CVC_WEB_PORT` moves it off 4343, `CVC_WEB_OPEN=0` does not open the browser. Not in
-the web version: the floating voice bar, pages and PDFs in the right pane, opening a file with the system.
+the web version: the floating voice bar, a file's page or PDF in the right pane, opening a file with the system. Web pages do open in the
+right pane there, in an iframe (the page's CSP allows https and this machine's own servers as frames); a site that forbids framing shows
+the browser's refusal, and the pane's button opens it in a new tab.
 
 The voice in the web version is the desktop's, with the microphone in the browser: the tab listens (the same VAD, `web/src/voice.ts`; the
 browser asks for the microphone once, and 127.0.0.1 counts as a secure page), the server hears and speaks. A recording travels to the server
@@ -66,6 +68,30 @@ audio (its length, the cut when the user talks). `tests/web.test.ts` runs the vo
 are refused). `scripts/jauvex.ts`
 works as with the desktop app while a browser tab is open. On Windows, Claude and Codex come from their own Windows packages
 (`claude-agent-sdk-win32-*`, `codex-win32-*`, installed by `npm install`), and ZCode's `zcode.cmd` is started through the shell.
+
+## OpenCut beside the app
+
+OpenCut, the open-source video editor (MIT, github.com/opencut-app/opencut-classic), runs beside the app, not inside it: nothing of it
+is copied here. Install and start it on its own, once (it needs Bun, and Docker for its database and Redis):
+
+```
+git clone https://github.com/opencut-app/opencut-classic opencut && cd opencut
+cp apps/web/.env.example apps/web/.env.local        # Windows: Copy-Item apps/web/.env.example apps/web/.env.local
+docker compose up -d db redis serverless-redis-http
+bun install
+bun dev:web                                          # http://localhost:3000
+```
+
+The sidebar's OpenCut item opens it in the right pane of the session on screen, desktop and web version alike, so an agent's chat and the
+editor sit side by side. When it does not answer, the pane says how to start it, with a button to try again (the backend asks first:
+`opencutUp`). In the desktop app every page in the pane is muted from the start; OpenCut's pane alone gets its sound back once it is up (a
+video editor has to be heard; with the voice on, keep the volume low or the microphone hears it). In the settings (the wheel): its address
+(`localhost:3000` by default; a port alone, a host and port, or a full http(s) address; anything else is refused, a `javascript:` address
+would run in the pane) and its folder, which is added to the sidebar like any other, so the agents work on OpenCut's code there. The same
+from the command line: `node scripts/jauvex.ts settings --opencut-url 3000 --opencut-folder ~/code/opencut`, and `opencut` to open it.
+Links to this machine's own servers (http://localhost and the like) may now open in the system's browser too; other http addresses still
+may not (`externalOk` in `shared/opencut.ts`). Checks: `tests/opencut.test.ts` (the address, the links, the page's frame rule),
+`tests/web.test.ts` (the probe), `tests/window/opencut.test.ts` (the item, the pane, the sound, the folder).
 
 ## Setting up on a fresh Mac
 

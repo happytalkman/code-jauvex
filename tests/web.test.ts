@@ -70,6 +70,10 @@ else {
   const spoken = await rpc('voice:speak', 'Hello from the web', '', 185); const audio = unpackBinary(spoken.value, b64);
   check('a spoken line comes back to the browser as audio', audio instanceof ArrayBuffer && Buffer.from(audio as ArrayBuffer).toString().includes('mock:Hello from the web'), JSON.stringify(spoken).slice(0, 160));
   await rpc('voice:on', false, 'web-check');
+  // OpenCut beside the app: the pane asks whether it answers before framing it
+  const oc = http.createServer((_q, r) => r.end('ok')); await new Promise<void>((ok) => oc.listen(4378, '127.0.0.1', ok));
+  const up = await rpc('api', 'opencutUp', 'http://127.0.0.1:4378'); oc.close(); const down = await rpc('api', 'opencutUp', 'http://127.0.0.1:4379');
+  check('OpenCut: running answers yes, not running no', up.value === true && down.value === false, JSON.stringify([up, down]));
   const second = start(); const secondOut = await second.out;
   check('a second copy on the same data folder refuses to start', /already runs on/.test(secondOut), secondOut.slice(0, 200));
   s.child.kill('SIGTERM'); await s.out;

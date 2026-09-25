@@ -7,11 +7,12 @@ import { AUTO_COMPACT_CHOICES, AUTO_COMPACT_DEFAULT, autoCompactPct, shouldCompa
 import { Accounts } from './Accounts';
 import { Welcome } from './Welcome';
 import typesafeMark from '../../assets/typesafe.png'; // TypeSafe's mark, on Jev agent rows: whose agent it is, like the provider marks
-import { Copy, EyeOff as HideIcon, Pencil, Bug, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Paperclip, Settings, Move, Keyboard, ChevronRight, Eye, EyeOff, FolderPlus, Folder, FolderOpen, Laptop, Mic, PanelLeft, Plus, RotateCw, Search, SlidersHorizontal, Settings2, Square, SquarePen, Trash2, MicOff, Volume2, VolumeX, AudioLines, Wrench, Brain, X, Check, ShieldQuestion } from 'lucide-react';
+import { Copy, EyeOff as HideIcon, Pencil, Bug, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Paperclip, Settings, Move, Keyboard, ChevronRight, Eye, EyeOff, FolderPlus, Folder, FolderOpen, Laptop, Mic, PanelLeft, Plus, RotateCw, Search, SlidersHorizontal, Settings2, Square, SquarePen, Trash2, Clapperboard, MicOff, Volume2, VolumeX, AudioLines, Wrench, Brain, X, Check, ShieldQuestion } from 'lucide-react';
 import { md } from './md';
 import { Pane, type PaneTarget } from './Pane';
 import { findAgents, shortIds, shortTitle } from '../../shared/roster';
 import { answerIs, stopSaysMore } from '../../shared/orders';
+import { opencutAddress, opencutUrl } from '../../shared/opencut';
 import { DICTATED_TAG, JAUVEX_HELLO, SIGN_IN_IN_APP, type AgentRequestEvent, type JauvexEntry, type UiState, type AgentCommand, type AgentResult, type Attachment, PROVIDERS, PROVIDER_LABEL, VOICE_DEFAULTS, kickoffMessage, type CommandDetails, providerOf, type VoiceCommand, type AppCommand, type Block, type BusyTriage, type DebugEvent, type ChatEvent, type ChatMessage, type ModelOption, type PermissionDecision, type Project, type Permissions, type Provider, type SessionInfo, type SessionPrefs, type VoiceSettings, type VoiceStatus } from '../../shared/types';
 import { ago, api, pickFolder, size } from './api';
 import { VoiceEngine, clean, type VoicePhase } from './voice';
@@ -114,7 +115,8 @@ export default function App() {
           const hit = findSession(c.folder ? findFolder(c.folder) : null, c.session) /* no folder named: every folder */; if (!hit) return { ok: false, error: `no session "${c.session}"` }; open({ projectId: hit.projectId, sessionId: hit.sessionId, key: `${hit.projectId}:${hit.sessionId}` }); return { ok: true, opened: hit.sessionId }; }
         case 'send': { const hit = findSession(c.folder ? findFolder(c.folder) : null, c.session) /* no folder named: every folder */; if (!hit) return { ok: false, error: `no session "${c.session}"` }; const ok = await deliverTo(hit.projectId, hit.sessionId, c.text); return ok ? { ok: true, sent: hit.sessionId } : { ok: false, error: 'the session could not take the message' }; }
         case 'rename': { const hit = findSession(c.folder ? findFolder(c.folder) : null, c.session) /* no folder named: every folder */; if (!hit) return { ok: false, error: `no session "${c.session}"` }; await api.rename(hit.projectId, hit.sessionId, c.title); await refresh(); return { ok: true }; }
-        case 'settings': { const ui: Partial<UiState> = {}; if (c.jauvexMove) { setJauvexMove(c.jauvexMove); ui.jauvexMove = c.jauvexMove; } if (c.defaultProvider && !PROVIDERS.includes(c.defaultProvider)) return { ok: false, error: `no provider "${c.defaultProvider}": ${PROVIDERS.join(', ')}` }; if (c.defaultProvider) { setDefaultProvider(c.defaultProvider); localStorage.setItem('cvc.provider', c.defaultProvider); ui.defaultProvider = c.defaultProvider; } if (typeof c.showJauvex === 'boolean') { setShowJauvex(c.showJauvex); ui.showJauvex = c.showJauvex; } if (typeof c.welcomeNext === 'boolean') { setWelcomeNext(c.welcomeNext); ui.welcomed = !c.welcomeNext; } if (typeof c.autoCompact === 'number') { if (!(c.autoCompact >= 0 && c.autoCompact <= 100)) return { ok: false, error: '--auto-compact takes a percentage from 1 to 99, or provider (the provider decides)' }; const n = Math.round(c.autoCompact); setAutoCompact(n); window.dispatchEvent(new CustomEvent('cvc-auto-compact', { detail: n })); ui.autoCompact = n; } if (Object.keys(ui).length) await api.setUi(ui); return { ok: true, ...ui }; }
+        case 'settings': { const ui: Partial<UiState> = {}; if (c.jauvexMove) { setJauvexMove(c.jauvexMove); ui.jauvexMove = c.jauvexMove; } if (c.defaultProvider && !PROVIDERS.includes(c.defaultProvider)) return { ok: false, error: `no provider "${c.defaultProvider}": ${PROVIDERS.join(', ')}` }; if (c.defaultProvider) { setDefaultProvider(c.defaultProvider); localStorage.setItem('cvc.provider', c.defaultProvider); ui.defaultProvider = c.defaultProvider; } if (typeof c.showJauvex === 'boolean') { setShowJauvex(c.showJauvex); ui.showJauvex = c.showJauvex; } if (typeof c.welcomeNext === 'boolean') { setWelcomeNext(c.welcomeNext); ui.welcomed = !c.welcomeNext; } if (typeof c.autoCompact === 'number') { if (!(c.autoCompact >= 0 && c.autoCompact <= 100)) return { ok: false, error: '--auto-compact takes a percentage from 1 to 99, or provider (the provider decides)' }; const n = Math.round(c.autoCompact); setAutoCompact(n); window.dispatchEvent(new CustomEvent('cvc-auto-compact', { detail: n })); ui.autoCompact = n; } if (c.opencutUrl !== undefined || c.opencutFolder !== undefined) { const r = await saveOpencut({ url: c.opencutUrl, folder: c.opencutFolder }); if (!r.ok) return r; ui.opencut = { url: r.url, ...(r.folder ? { folder: r.folder } : {}) }; } if (Object.keys(ui).length) await api.setUi(ui); return { ok: true, ...ui }; }
+        case 'opencut': { const up = await openOpencut(); return up ? { ok: true, opened: opencutUrl(opencut.url) } : { ok: false, error: `OpenCut does not answer at ${opencutUrl(opencut.url)}: start it first (bun dev:web in its folder)` }; }
         case 'welcome': setWelcomeOpen(true); return { ok: true };
         case 'reload-ui': setTimeout(() => void window.desktop.appReload(), 500); return { ok: true };
         case 'restart-app': setTimeout(() => void window.desktop.appRestart(), 500); return { ok: true };
@@ -136,6 +138,13 @@ export default function App() {
     if (/^[a-z][a-z0-9+.-]*:/i.test(h) && !/^file:/i.test(h)) { void window.desktop.openExternal(h); return; } /* mailto and the like: the Mac */
     let p = /^file:/i.test(h) ? decodeURI(h.replace(/^file:\/\/(localhost)?/i, '')) : h; if (!p.startsWith('/') && !p.startsWith('~')) p = `${base.replace(/\/$/, '')}/${p.replace(/^\.\//, '')}`;
     setPane({ kind: 'file', path: p.replace(/[?#].*$/, '') }); };
+  // OpenCut, the video editor, runs on its own (shared/opencut.ts): the sidebar's item opens it in this session's pane, with its sound on.
+  const [opencut, setOpencut] = useState<NonNullable<UiState['opencut']>>({});
+  const openOpencut = async () => { const url = opencutUrl(opencut.url); const up = await api.opencutUp(url).catch(() => false); setPane({ kind: 'url', url, sound: true, ...(up ? {} : { down: `OpenCut does not answer at ${url}. Start it in its own folder (bun dev:web; the README says how to install it), then try again.` }) }); return up; };
+  const saveOpencut = async (patch: { url?: string; folder?: string }): Promise<{ ok: true; url: string; folder?: string } | { ok: false; error: string }> => {
+    const next = { ...opencut }; if (patch.url !== undefined) { const a = opencutAddress(patch.url); if (!a.ok) return a; next.url = a.url; }
+    if (patch.folder !== undefined) { const f = patch.folder.trim(); if (f) { try { const pr = await api.addProject(f); next.folder = pr.path; await refresh(); } catch (e) { return { ok: false, error: (e as Error).message }; } } else delete next.folder; } /* its folder is a folder like any other: the agents work on OpenCut there */
+    setOpencut(next); await api.setUi({ opencut: next }); return { ok: true, url: opencutUrl(next.url), ...(next.folder ? { folder: next.folder } : {}) }; };
   const openLinkRef = useRef(openLink); openLinkRef.current = openLink;
   useEffect(() => window.desktop.onPaneOpen((url) => openLinkRef.current(url, '')), []); /* the window was asked to navigate away (a link the app did not catch): the pane takes it */
   useEffect(() => { const w = Number(localStorage.getItem('cvc.pane.w')); if (w >= 320) document.documentElement.style.setProperty('--pane-w', `${w}px`); }, []);
@@ -168,7 +177,7 @@ export default function App() {
   useEffect(() => { void (async () => {
     await refresh();
     if (restored.current) return; restored.current = true;
-    try { const s = await api.state(); const u = s.ui; if (u?.sidebar === false) setSidebar(false); if (u?.showMeta) setShowMeta(true); setAutoCompact(autoCompactPct(u)); if (!u?.welcomed) setWelcomeOpen(true); setWelcomeNext(!u?.welcomed); setJauvexSession(u?.jauvexSession ?? null); setJauvexProvider(u?.jauvexProvider ?? null); setJauvexMove(u?.jauvexMove ?? 'unified'); setShowJauvex(u?.showJauvex !== false); if (u?.defaultProvider) { setDefaultProvider(u.defaultProvider); localStorage.setItem('cvc.provider', u.defaultProvider); }
+    try { const s = await api.state(); const u = s.ui; if (u?.sidebar === false) setSidebar(false); if (u?.showMeta) setShowMeta(true); setAutoCompact(autoCompactPct(u)); if (!u?.welcomed) setWelcomeOpen(true); setWelcomeNext(!u?.welcomed); setJauvexSession(u?.jauvexSession ?? null); setJauvexProvider(u?.jauvexProvider ?? null); setJauvexMove(u?.jauvexMove ?? 'unified'); setShowJauvex(u?.showJauvex !== false); setOpencut(u?.opencut ?? {}); if (u?.defaultProvider) { setDefaultProvider(u.defaultProvider); localStorage.setItem('cvc.provider', u.defaultProvider); }
       void api.jauvexProject().then((j) => { setJauvex(j); setProjects((ps) => (ps.some((x) => x.id === j.id) ? ps : [...ps, j])); }).catch(() => {}); // the first time it is created after the state was loaded: the chat needs it in the list
       const p = u?.sel && s.projects.find((x) => x.id === u.sel!.projectId);
       // Turns still running in the main process (the window was reloaded, not the app): their sessions are mounted with the running
@@ -310,6 +319,7 @@ export default function App() {
           <div className="side-grip" title="Drag to resize" onPointerDown={onSideGrip} />
           <nav className="side-nav">
             <button className="nav-item" onClick={() => void addFolder()}><span className="nav-ico"><FolderPlus size={16} /></span>Add folder</button>
+            <button className="nav-item" title={`OpenCut, the video editor, in the right pane (${opencutUrl(opencut.url)}; it runs on its own: see the settings)`} onClick={() => void openOpencut()}><span className="nav-ico"><Clapperboard size={16} /></span>OpenCut</button>
           </nav>
           <div className="side-scroll">
             {jauvex && showJauvex && (() => { const key = `${jauvex.id}:jauvex`; const on = sel?.key === key; return (
@@ -327,7 +337,7 @@ export default function App() {
               <div className="side-voice-btns"><button className={`${voiceUi.micMuted ? 'muted' : ''}${voiceUi.muteIn != null ? ' counting' : ''}`} title={voiceUi.muteIn != null ? `Muting in ${voiceUi.muteIn} s` : voiceUi.micMuted ? 'Unmute microphone' : 'Mute microphone'} onClick={voiceUi.toggleMic}>{voiceUi.micMuted ? <MicOff size={15} /> : <Mic size={15} />}{voiceUi.muteIn != null && <span className="mute-count" key={voiceUi.muteIn}>{voiceUi.muteIn}</span>}</button><button className={voiceUi.speakerOff ? 'muted' : ''} title={voiceUi.speakerOff ? 'Turn the voice back on' : 'Silence the voice'} onClick={voiceUi.toggleSpeaker}>{voiceUi.speakerOff ? <VolumeX size={15} /> : <Volume2 size={15} />}</button><button title="End voice chat" onClick={voiceUi.end}><X size={15} /></button></div>
             </div>); })()}
           <footer className="side-foot"><button className="foot-btn" title={SIGN_IN_IN_APP ? 'Accounts: who each provider is signed in as; sign out, sign in, switch' : 'Accounts: who each provider is signed in as, and how to sign in with its own command line'} onClick={() => setAccountsOpen(true)}>Jauvex <em>{__APP_VERSION__}</em></button><button className="icon-btn sm" title="Jauvex settings" onClick={() => setSettingsOpen(true)}><Settings size={14} /></button><Mark /></footer>
-          {settingsOpen && <SettingsPanel autoCompact={autoCompact} onAutoCompact={changeAutoCompact} signedIn={signedIn} welcomeNext={welcomeNext} onWelcomeNext={(on) => { setWelcomeNext(on); void api.setUi({ welcomed: !on }); }} onOpenWelcome={() => { setSettingsOpen(false); setWelcomeOpen(true); }} defaultProvider={defaultProvider} onDefaultProvider={(p) => { setDefaultProvider(p); localStorage.setItem('cvc.provider', p); void api.setUi({ defaultProvider: p }); }} showJauvex={showJauvex} onShowJauvex={(on) => { setShowJauvex(on); void api.setUi({ showJauvex: on }); }} jauvexMove={jauvexMove} onJauvexMove={(m) => { setJauvexMove(m); void api.setUi({ jauvexMove: m }); }} onClose={() => setSettingsOpen(false)} />}
+          {settingsOpen && <SettingsPanel autoCompact={autoCompact} onAutoCompact={changeAutoCompact} signedIn={signedIn} welcomeNext={welcomeNext} onWelcomeNext={(on) => { setWelcomeNext(on); void api.setUi({ welcomed: !on }); }} onOpenWelcome={() => { setSettingsOpen(false); setWelcomeOpen(true); }} opencut={opencut} onOpencut={saveOpencut} defaultProvider={defaultProvider} onDefaultProvider={(p) => { setDefaultProvider(p); localStorage.setItem('cvc.provider', p); void api.setUi({ defaultProvider: p }); }} showJauvex={showJauvex} onShowJauvex={(on) => { setShowJauvex(on); void api.setUi({ showJauvex: on }); }} jauvexMove={jauvexMove} onJauvexMove={(m) => { setJauvexMove(m); void api.setUi({ jauvexMove: m }); }} onClose={() => setSettingsOpen(false)} />}
           {accountsOpen && <Accounts onClose={() => setAccountsOpen(false)} />}
           {welcomeOpen && <Welcome jauvexMove={jauvexMove} onJauvexMove={(m) => { setJauvexMove(m); void api.setUi({ jauvexMove: m }); }} defaultProvider={defaultProvider} onDefault={(p) => { setDefaultProvider(p); localStorage.setItem('cvc.provider', p); void api.setUi({ defaultProvider: p }); }} onDone={(start) => { setWelcomeOpen(false); setWelcomeNext(false); void api.setUi({ welcomed: true });
             if (start && jauvex) { const key = `${jauvex.id}:jauvex`; open({ projectId: jauvex.id, sessionId: jauvexSession, key, name: 'Jauvex', voice: true, ...(jauvexSession ? {} : { kickoff: JAUVEX_HELLO }) }); } /* Start: the first conversation is with the Jauvex agent, voice on; the very first time it introduces itself */ }} />}
@@ -348,7 +358,7 @@ export default function App() {
         {sel && project ? null
           : <div className="empty"><Mark /><h2>Pick a session</h2><p>Add a folder, choose which of its Claude and Codex sessions to keep in the sidebar, then open one and keep talking, or start a new one with either.</p></div>}
       </main>
-      {pane && <Pane target={pane} onClose={() => setPane(null)} />}
+      {pane && <Pane target={pane} onClose={() => setPane(null)} onRetry={pane.kind === 'url' && pane.sound ? () => void openOpencut() : undefined} />}
 
       {debugOpen && <DebugPanel onClose={() => { localStorage.setItem('cvc.debug', '0'); setDebugOpen(false); }} />}
       {picker && <SessionPicker project={picker} all={infos[picker.id]} onClose={() => setPicker(null)} onSave={async (ids) => { const byId = new Map((infos[picker.id] ?? []).map((s) => [s.sessionId, s.provider])); await api.setSessions(picker.id, ids, Object.fromEntries(ids.filter((id) => byId.has(id)).map((id) => [id, byId.get(id)!]))); setPicker(null); await refresh(); }} />}
@@ -1200,7 +1210,7 @@ export function Mini() {
 }
 
 /** The app's own settings (the wheel in the sidebar's footer). Voice settings stay with the voice; accounts with the accounts panel. */
-function SettingsPanel({ signedIn, welcomeNext, onWelcomeNext, onOpenWelcome, defaultProvider, onDefaultProvider, showJauvex, onShowJauvex, jauvexMove, onJauvexMove, autoCompact, onAutoCompact, onClose }: { autoCompact: number; onAutoCompact: (pct: number) => void; signedIn: Record<Provider, boolean>; welcomeNext: boolean; onWelcomeNext: (on: boolean) => void; onOpenWelcome: () => void; defaultProvider: Provider | null; onDefaultProvider: (p: Provider) => void; showJauvex: boolean; onShowJauvex: (on: boolean) => void; jauvexMove: 'unified' | 'handoff'; onJauvexMove: (m: 'unified' | 'handoff') => void; onClose: () => void }) {
+function SettingsPanel({ opencut, onOpencut, signedIn, welcomeNext, onWelcomeNext, onOpenWelcome, defaultProvider, onDefaultProvider, showJauvex, onShowJauvex, jauvexMove, onJauvexMove, autoCompact, onAutoCompact, onClose }: { opencut: NonNullable<UiState['opencut']>; onOpencut: (patch: { url?: string; folder?: string }) => Promise<{ ok: boolean; error?: string }>; autoCompact: number; onAutoCompact: (pct: number) => void; signedIn: Record<Provider, boolean>; welcomeNext: boolean; onWelcomeNext: (on: boolean) => void; onOpenWelcome: () => void; defaultProvider: Provider | null; onDefaultProvider: (p: Provider) => void; showJauvex: boolean; onShowJauvex: (on: boolean) => void; jauvexMove: 'unified' | 'handoff'; onJauvexMove: (m: 'unified' | 'handoff') => void; onClose: () => void }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal settings" role="dialog" aria-label="Jauvex settings" onClick={(e) => e.stopPropagation()}>
@@ -1221,6 +1231,7 @@ function SettingsPanel({ signedIn, welcomeNext, onWelcomeNext, onOpenWelcome, de
           <p className="muted">The pile of sheets next to each composer shows how full that agent's context is: click it for the numbers and to compact now. Compacting replaces the conversation so far with a summary. It also happens at once when a message does not fit, and that message is then sent again.</p>
         </section>
         <VoiceChatSettings provider={defaultProvider ?? 'claude'} />
+        <OpencutSettings opencut={opencut} onSave={onOpencut} />
         <section className="settings-group">
           <strong>Welcome screen</strong>
           <label className="check"><input type="checkbox" checked={welcomeNext} onChange={(e) => onWelcomeNext(e.target.checked)} />Show it again on the next start</label>
@@ -1234,6 +1245,22 @@ function SettingsPanel({ signedIn, welcomeNext, onWelcomeNext, onOpenWelcome, de
         <div className="modal-foot"><span className="app-version">Jauvex Personal {__APP_VERSION__}</span><button onClick={onClose}>Close</button></div>
       </div>
     </div>
+  );
+}
+
+/** OpenCut beside the app: where it answers, and its folder (added to the sidebar, so agents work on it). It is installed and started on its own. */
+function OpencutSettings({ opencut, onSave }: { opencut: NonNullable<UiState['opencut']>; onSave: (patch: { url?: string; folder?: string }) => Promise<{ ok: boolean; error?: string }> }) {
+  const [url, setUrl] = useState(opencut.url ?? ''); const [folder, setFolder] = useState(opencut.folder ?? ''); const [note, setNote] = useState('');
+  const save = async (patch: { url?: string; folder?: string }) => { const r = await onSave(patch); setNote(r.ok ? 'Saved.' : r.error ?? 'failed'); };
+  return (
+    <section className="settings-group">
+      <strong>OpenCut (video editor)</strong>
+      <label className="check stack">Its address<input className="model" value={url} placeholder={opencutUrl('')} onChange={(e) => setUrl(e.target.value)} onBlur={() => { if (url !== (opencut.url ?? '')) void save({ url }); }} onKeyDown={(e) => { if (e.key === 'Enter') void save({ url }); }} /></label>
+      <label className="check stack">Its folder (added to the sidebar, so agents can work on OpenCut)<input className="model" value={folder} placeholder="the folder OpenCut was cloned into" onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save({ folder }); }} /></label>
+      <div className="row-btns"><button onClick={() => void save({ folder })}>Add the folder</button></div>
+      {note && <p className="muted">{note}</p>}
+      <p className="muted">OpenCut runs on its own: clone github.com/opencut-app/opencut-classic, then in its folder <code>bun install</code> and <code>bun dev:web</code> (the README has the steps). The OpenCut item in the sidebar opens it in the right pane.</p>
+    </section>
   );
 }
 

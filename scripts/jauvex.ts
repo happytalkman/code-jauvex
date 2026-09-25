@@ -22,8 +22,8 @@ const shapes = {
   open: () => ({ type: 'open', folder: flags.folder, session: flags.session ?? bare[0] }),
   send: () => ({ type: 'send', folder: flags.folder, session: flags.session, text: flags.text ?? bare.join(' ') }),
   rename: () => ({ type: 'rename', folder: flags.folder, session: flags.session, title: flags.title ?? bare.join(' ') }),
-  settings: () => ({ type: 'settings', defaultProvider: flags['default-provider'], showJauvex: bool('show-jauvex'), welcomeNext: bool('welcome-next'), jauvexMove: flags['jauvex-move'], autoCompact: flags['auto-compact'] === undefined ? undefined : /^provider$/i.test(String(flags['auto-compact'])) ? 0 : Number(String(flags['auto-compact']).replace('%', '')) }), // provider: the provider decides
-  welcome: () => ({ type: 'welcome' }), reload: () => ({ type: 'reload-ui' }), restart: () => ({ type: 'restart-app' }),
+  settings: () => ({ type: 'settings', defaultProvider: flags['default-provider'], showJauvex: bool('show-jauvex'), welcomeNext: bool('welcome-next'), jauvexMove: flags['jauvex-move'], opencutUrl: flags['opencut-url'], opencutFolder: flags['opencut-folder'], autoCompact: flags['auto-compact'] === undefined ? undefined : /^provider$/i.test(String(flags['auto-compact'])) ? 0 : Number(String(flags['auto-compact']).replace('%', '')) }), // provider: the provider decides
+  welcome: () => ({ type: 'welcome' }), opencut: () => ({ type: 'opencut' }), reload: () => ({ type: 'reload-ui' }), restart: () => ({ type: 'restart-app' }),
 };
 if (!cmd || !shapes[cmd]) { console.error(`usage: node scripts/jauvex.ts <${Object.keys(shapes).join('|')}> [--flag value ...]`); process.exit(2); }
 const body = Object.fromEntries(Object.entries(shapes[cmd]()).filter(([, v]) => v !== undefined));
