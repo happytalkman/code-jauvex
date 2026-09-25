@@ -19,8 +19,10 @@ check('no parameters, no parameters field', !('parameters' in (JSON.parse(graphR
 let threw = false; try { graphRequest(cfg, 't', '   '); } catch { threw = true; } check('an empty query is refused', threw);
 check('an error of the node is said in words', graphAnswer(400, '{"error":{"message":"syntax error near RETRN"}}').text === 'WEAIDdb said 400: syntax error near RETRN' && !graphAnswer(500, '').ok);
 const big = graphAnswer(200, 'x'.repeat(30_000)); check('a long answer is cut, saying how to get less', big.ok && big.text.length < 20_200 && /add LIMIT/.test(big.text));
+const { newId } = await import('../shared/graph.ts');
+check('a new id: an integer, time-based, unique enough, exact as a JSON number', Number.isSafeInteger(newId()) && newId(1_790_000_000_000, 0.999) === 1_790_000_000_000_999 && newId() !== newId(Date.now() + 1));
 const brief = clientBriefing(false, undefined, false, '/app');
-check('every agent is told about it, with the command at the app\'s path', brief.includes('WEAIDdb') && brief.includes('node "/app/scripts/graph.ts"'));
+check('every agent is told about it, with the command at the app\'s path and the subset it speaks', brief.includes('WEAIDdb') && brief.includes('node "/app/scripts/graph.ts"') && /integer `id`/.test(brief) && /MERGE \(p:Project/.test(brief));
 
 // ---- the stand-in node, and the two ways to it
 const seen: { url?: string; headers: http.IncomingHttpHeaders; body: string }[] = [];
@@ -44,6 +46,7 @@ const c1 = await cli('CREATE (:Note {project: $p})', '--params', '{"p":"site"}')
 check('the command line: the same query, the values as parameters', c1.code === 0 && /"value":2/.test(c1.out) && (JSON.parse(seen.at(-1)!.body) as { parameters: { p: string } }).parameters.p === 'site', c1.err || c1.out);
 const c2 = await cli('status'); check('... status: ready', c2.code === 0 && /"ready":true/.test(c2.out), c2.out);
 const c3 = await cli('RETURN 1', '--params', 'not json'); check('... bad --params is refused', c3.code === 2);
+const c5 = await cli('newid'); check('... newid prints a fresh integer id', c5.code === 0 && /^\d{16}$/.test(c5.out.trim()), c5.out);
 node.close(); admin.close(); await new Promise((r) => setTimeout(r, 100));
 const down = await graphdb.query('RETURN 1'); check('a node that is down: said, with how to start it', !down.ok && /does not answer/.test(down.text) && /weaiddb\.ps1/.test(down.text), down.text);
 const c4 = await cli('status'); check('... status says it too', c4.code === 1 && /"ready":false/.test(c4.out));

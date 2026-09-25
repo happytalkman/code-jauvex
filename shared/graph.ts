@@ -19,6 +19,10 @@ export function graphRequest(cfg: GraphConfig, token: string, query: string, par
   return { url: `${cfg.url}/v1/graphs/${encodeURIComponent(cfg.graph)}/query`, init: { method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-graph-namespace': cfg.namespace, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ cell_id: cfg.cell, query: q, ...(parameters && Object.keys(parameters).length ? { parameters } : {}), timeout_ms: timeoutMs }) } };
 }
 
+/** A node id for something new. WEAIDdb's node ids are integers the writer chooses (its CREATE and MERGE match on them), and it has no
+ * max() to find the last one: the time in milliseconds times 1000 plus three random digits, well inside a double's exact integers. */
+export const newId = (now = Date.now(), rnd = Math.random()): number => now * 1000 + Math.floor(rnd * 1000);
+
 /** What an agent reads back: the node's JSON as it came, cut to a size a conversation can hold, or the node's error in words. */
 export function graphAnswer(status: number, body: string, limit = 20_000): { ok: boolean; text: string } {
   const ok = status >= 200 && status < 300; let text = body.trim();
