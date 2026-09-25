@@ -50,6 +50,11 @@ jobs:
             $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:4343/' -TimeoutSec 30
             Check 'the page is served' ($page.StatusCode -eq 200 -and $page.Content -match '<div id="root">') $page.StatusCode
             $st = Rpc 'api' @('state'); Check 'the backend answers' ($st.ok) ($st | ConvertTo-Json -Depth 3 -Compress)
+            # the app's own agent: its folder is made and it is in the state (the sidebar's Jauvex row)
+            $jx = Rpc 'api' @('jauvexProject'); Write-Host "jauvexProject: $($jx | ConvertTo-Json -Depth 4 -Compress)"
+            Check 'the Jauvex agent is there' ($jx.ok -and $jx.value.builtin -eq 'jauvex') "$($jx.error)"
+            $st2 = (Rpc 'api' @('state')).value; Check '... and stays in the state' (@($st2.projects | Where-Object { $_.builtin -eq 'jauvex' }).Count -eq 1) ($st2 | ConvertTo-Json -Depth 4 -Compress)
+            $ss = Rpc 'api' @('sessions', $jx.value.id); Check '... and its sessions can be listed' ($ss.ok) "$($ss.error)"
             $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
             Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''
             Check 'setup: whisper-server is found' ($sc.whisperBinary) ''
