@@ -67,13 +67,15 @@ jobs:
             Check '... and asks for an API key' ((-not $cs.signedIn) -and $cs.error -match 'ANTHROPIC_API_KEY') "$($cs.error)"
             # Paperclip, started and connected by the install: running, this app in its company, its issues readable with the kept key
             $ErrorActionPreference = 'Continue'
-            $pcs = node scripts\paperclip.ts status | ConvertFrom-Json; Write-Host "paperclip: $($pcs | ConvertTo-Json -Compress)"
+            $env:CVC_DATA_DIR = $null  # the setup connected this app in the user's data folder (<home>\.jauvex\personal), as on a user's machine
+            function FromJson($t) { try { $t | ConvertFrom-Json } catch { Write-Host "not JSON: $t"; $null } }
+            $pcs = FromJson (node scripts\paperclip.ts status | Out-String); Write-Host "paperclip: $($pcs | ConvertTo-Json -Compress)"
             Check 'Paperclip runs, and this app is connected to its company' ($pcs.up -and $pcs.connected) ''
             $iss = node scripts\paperclip.ts GET '/api/companies/{companyId}/issues'; Check '... its issues come back with the kept key' ($LASTEXITCODE -eq 0 -and "$iss".TrimStart().StartsWith('[')) "$iss"
             # JSON piped in (-): Windows PowerShell drops the quotes of a JSON argument, and says so when given one
             $lost = node scripts\paperclip.ts POST '/api/companies/{companyId}/issues' '{"title":"x"}' 2>&1 | Out-String; Check 'a JSON argument that lost its quotes is said as such' ($lost -match 'lost its double quotes') "$lost"
-            $new = '{"title":"Windows check"}' | node scripts\paperclip.ts POST '/api/companies/{companyId}/issues' - | ConvertFrom-Json
-            $cm = '{"body":"from the Windows check"}' | node scripts\paperclip.ts POST "/api/issues/$($new.id)/comments" - | ConvertFrom-Json
+            $new = FromJson ('{"title":"Windows check"}' | node scripts\paperclip.ts POST '/api/companies/{companyId}/issues' - | Out-String)
+            $cm = FromJson ('{"body":"from the Windows check"}' | node scripts\paperclip.ts POST "/api/issues/$($new.id)/comments" - | Out-String)
             Check '... an issue opened, and a comment on it (as the board, marked)' ($new.id -and $cm.body -eq '[from Jauvex] from the Windows check') "$($cm | ConvertTo-Json -Compress)"
             # the browser agent, set up by the install: its clone and environment are there; without a TypeSafe key it says so
             $env:Path = "$HOME\.local\bin;$env:Path"
