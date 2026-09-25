@@ -13,9 +13,9 @@ function Say($t) { Write-Host "`n== $t" -ForegroundColor Cyan }
 function Fail($t) { Write-Host "`n$t" -ForegroundColor Red; if (-not $env:CI) { Read-Host 'Press Enter to close' }; exit 1 }
 function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Refresh-Path { $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') }
-function Winget($id, $what) {
+function Install-WithWinget($id, $what) { # not named Winget: PowerShell names ignore case, and winget inside it then called itself until the call depth overflowed
   if (-not (Has 'winget')) { Fail "$what is missing and winget is not here to install it. Install $what yourself, then run this again." }
-  Say "Installing $what (winget)"; winget install --id $id -e --source winget --accept-package-agreements --accept-source-agreements
+  Say "Installing $what (winget)"; winget.exe install --id $id -e --source winget --accept-package-agreements --accept-source-agreements
   Refresh-Path
 }
 
@@ -25,11 +25,11 @@ $nodeMin = if ($withZcode) { [version]'24.0.0' } else { [version]'22.18.0' }
 function Node-Ok { if (-not (Has 'node')) { return $false }; try { [version]((node -v).TrimStart('v')) -ge $nodeMin } catch { $false } }
 if (-not (Node-Ok)) {
   if (Has 'node') { Write-Host "Node $(node -v) is too old: this needs $nodeMin or newer." -ForegroundColor Yellow }
-  Winget 'OpenJS.NodeJS.LTS' 'Node.js'
+  Install-WithWinget 'OpenJS.NodeJS.LTS' 'Node.js'
   if (-not (Node-Ok)) { $env:Path = "$env:ProgramFiles\nodejs;$env:Path" } # an older Node earlier on the PATH still answers first
   if (-not (Node-Ok)) { Fail "Node.js $nodeMin or newer is not reachable yet: close this window, open a new PowerShell, run the same command again. (An older Node from nvm or another installer may come first on the PATH.)" }
 }
-if (-not (Has 'git')) { Winget 'Git.Git' 'Git'; if (-not (Has 'git')) { Fail 'Git was installed but this window does not see it yet: close it, open a new PowerShell, run the same command again.' } }
+if (-not (Has 'git')) { Install-WithWinget 'Git.Git' 'Git'; if (-not (Has 'git')) { Fail 'Git was installed but this window does not see it yet: close it, open a new PowerShell, run the same command again.' } }
 
 # The copy: this folder when the script runs from one, else <home>\jauvex (cloned the first time, brought up to date after).
 $here = if ($PSScriptRoot) { Split-Path $PSScriptRoot -Parent } else { $null }
