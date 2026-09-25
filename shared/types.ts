@@ -1,9 +1,9 @@
 // Shared between the Electron main process and the React UI.
-// Every session belongs to one provider for life: a Claude session continues with Claude, a Codex one with Codex.
+// Every session belongs to one provider for life: a Claude session continues with Claude, a Codex one with Codex, a ZCode one with ZCode.
 import type { ContextUsage } from './context';
-export type Provider = 'claude' | 'codex';
-export const PROVIDERS: Provider[] = ['claude', 'codex'];
-export const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', codex: 'Codex' };
+export type Provider = 'claude' | 'codex' | 'zcode';
+export const PROVIDERS: Provider[] = ['claude', 'codex', 'zcode'];
+export const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', codex: 'Codex', zcode: 'ZCode' };
 // providers: sessionId -> provider, for the picked sessions that are not Claude's (absent = claude, so older state files stay valid).
 export type Project = { id: string; path: string; name: string; builtin?: 'jauvex'; sessions: string[]; providers?: Record<string, Provider>; jev?: JevAgent[]; prefs?: Record<string, SessionPrefs>; context?: Record<string, ContextUsage> /* sessionId -> how full its context was after its last turn (shared/context.ts), kept by the main process */ };
 // What was picked in a session's composer stays with that session: model, effort, permissions. ('' = the provider's default.)
@@ -112,6 +112,7 @@ export const SIGN_IN_IN_APP = false;
 export const SIGN_IN_CLI: Record<Provider, { login: string; logout: string; tool: string; install: string }> = {
   claude: { login: 'claude auth login', logout: 'claude auth logout', tool: 'Claude Code', install: 'curl -fsSL https://claude.ai/install.sh | bash' },
   codex: { login: 'codex login', logout: 'codex logout', tool: 'Codex', install: 'brew install codex' },
+  zcode: { login: 'zcode login', logout: 'zcode logout', tool: 'ZCode', install: 'pnpm build:zcode (in a clone of github.com/zai-org/ZCode), then put its zcode on the PATH' },
 };
 export const AGENT_COMMANDS_HELP = 'node scripts/jauvex.ts <command> [--flag value ...], from any folder. Commands: list (folders, sessions and agents, with ids); add-folder <path>; pick-folder (opens the folder dialog for the user, adds what they choose); new-agent [--provider claude|codex|jev] [--folder <name|path|id>] [--name "..."] [--purpose "..."] [--kickoff "first message"] (the agent starts at once, with its own introduction when no first message is given: it exists, and is listed, from then on); open [--folder ...] [--session <id|title>] (no session: the Jauvex agent); send --session <id|title> [--folder ...] --text "..."; rename --session <id|title> --title "..."; settings [--default-provider claude|codex] [--show-jauvex yes|no] [--welcome-next yes|no] [--jauvex-move unified|handoff] [--auto-compact <percent>|provider] (compact an agent\'s conversation when its context is that full); welcome; reload (the window, after a UI build); restart (the app, after a main-process build; it kills your own turn: last thing you do). Each prints a JSON result.';
 /** The Jauvex agent: the one session that always exists, the entry point for everything about the app itself. */

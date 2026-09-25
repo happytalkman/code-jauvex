@@ -509,7 +509,21 @@ Press the white round button in the message box. All local except the two Claude
   Same login, config and session store as the Codex CLI, nothing in `~/.codex` parsed by hand. The binary is the
   `@openai/codex` npm dependency; `codex app-server generate-ts --out <dir>` prints the protocol types for the
   installed version. One server process starts on first use and is shared by every Codex chat.
-- `electron/chat.ts` routes each turn by the session's provider; both providers send the UI the same `ChatEvent`s.
+- ZCode sessions (a third provider, first cut) come from **`zcode app-server`** (`electron/zcode.ts`): the ZCode Protocol that
+  ZCode's own desktop app runs its agent with ([github.com/zai-org/ZCode](https://github.com/zai-org/ZCode), read at v3.14.3), one JSON
+  object per line over stdio. `session/list` for the folder, `session/create` / `session/resume`, `session/subscribe` (the turn's events
+  only reach a subscribed client), `session/send`, `session/stop`, `session/compact`, `session/messages`, and the host's
+  `interaction/requestPermission`, shown as the usual permission card. Same config, providers and session store as the ZCode CLI
+  (`~/.zcode`), nothing there parsed by hand; the binary is the `zcode` on the PATH (`CVC_ZCODE_BIN` points elsewhere, the checks at
+  `tests/mock/zcode`). Its limits, as that protocol has them: no system prompt per session, so the app's briefing goes in front of a new
+  session's first message, marked, and is cut off again when the transcript is shown; a message during a ZCode turn is refused, so it
+  waits in the queue and goes when the turn ends (no steering); the permission choice maps to ZCode's modes (ask: `build`; auto: `edit`,
+  which edits on its own and still asks before commands; ZCode's own `auto` refuses every tool and is never sent); models are ZCode's
+  default, or `provider/model` from its config; ZCode's account models need headers its desktop host supplies, so here it runs on
+  providers configured with an API key. Not there yet: images, renaming, the model list, the context meter, the usage battery, and a
+  ZCode voice model (the voice of a ZCode session is Claude's small model for now). "Signed in" means the `zcode` command answers.
+  Checked in `tests/zcode-provider.test.ts`.
+- `electron/chat.ts` routes each turn by the session's provider; every provider sends the UI the same `ChatEvent`s.
 - Two threads per chat. The main thread is the session itself (Claude or Codex, the model in the picker). The voice
   thread is a small model **from the same provider** (Haiku for Claude sessions; for Codex sessions the account's fast,
   affordable model, in a throwaway `ephemeral` thread with a read-only sandbox, so nothing lands in your Codex history;

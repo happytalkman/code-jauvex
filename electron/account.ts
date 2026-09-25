@@ -2,6 +2,7 @@ import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import type { AccountEvent, AccountStatus, Provider } from '../shared/types.js';
 import * as codex from './codex.js';
+import * as zcode from './zcode.js';
 import * as debug from './debug.js';
 
 /**
@@ -11,6 +12,7 @@ import * as debug from './debug.js';
  *           the app, and if it asks for something (a pasted code) the user can type it there.
  *   Codex:  the app-server's account API (`account/read`, `account/login/start` with the ChatGPT flow, `account/logout`);
  *           the browser is opened on the URL it returns and `account/login/completed` says when it is done.
+ *   ZCode:  whether its CLI answers (`zcode --version`); it signs in and keeps its API keys in its own config (`zcode login`).
  * Only what the panel shows leaves here (signed in or not, the e-mail, the plan). Tokens and keys are never read.
  */
 const ROOT = process.env.CVC_ROOT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -34,6 +36,7 @@ export async function status(provider: Provider): Promise<AccountStatus> {
       const j = JSON.parse(r.out.slice(r.out.indexOf('{'))) as { loggedIn?: boolean; email?: string; subscriptionType?: string; authMethod?: string; apiProvider?: string };
       return { provider, signedIn: !!j.loggedIn, who: j.email ?? '', plan: j.subscriptionType ?? '', method: j.authMethod ?? j.apiProvider ?? '' };
     }
+    if (provider === 'zcode') { const v = await zcode.version(); return v === null ? { provider, signedIn: false, who: '', plan: '', method: '', error: 'The zcode command was not found.' } : { provider, signedIn: true, who: '', plan: '', method: v ? `ZCode CLI ${v}` : 'ZCode CLI' }; }
     const r = await codex.account();
     const a = r.account; if (!a) return { provider, signedIn: false, who: '', plan: '', method: '' };
     return { provider, signedIn: true, who: a.type === 'chatgpt' ? a.email ?? '' : '', plan: a.type === 'chatgpt' ? String(a.planType ?? '') : '', method: a.type === 'chatgpt' ? 'ChatGPT' : a.type };
@@ -42,7 +45,7 @@ export async function status(provider: Provider): Promise<AccountStatus> {
 
 export async function logout(provider: Provider): Promise<AccountStatus> {
   debug.log('note', `${provider}: signing out`, { by: 'app' });
-  if (provider === 'claude') await run(CLAUDE, ['auth', 'logout']); else await codex.logout();
+  if (provider === 'claude') await run(CLAUDE, ['auth', 'logout']); else if (provider === 'codex') await codex.logout(); else await run(process.env.CVC_ZCODE_BIN || 'zcode', ['logout']);
   return status(provider);
 }
 
@@ -51,6 +54,7 @@ const flows = new Map<Provider, ChildProcess | { cancel: () => void }>();
 export async function login(provider: Provider): Promise<boolean> {
   if (flows.has(provider)) return false;
   debug.log('note', `${provider}: sign-in started`, { by: 'app' });
+  if (provider === 'zcode') { emit({ provider, type: 'done', ok: false, error: 'Sign in to ZCode in Terminal: zcode login' }); return false; }
   if (provider === 'codex') {
     const r = await codex.loginStart(); flows.set('codex', { cancel: () => { void codex.loginCancel(r.loginId); } });
     emit({ provider, type: 'url', url: r.authUrl }); emit({ provider, type: 'line', text: 'Sign in with ChatGPT in the browser window that just opened. This waits for it to finish.' });

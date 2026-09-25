@@ -56,7 +56,7 @@ export default function App() {
   const [autoCompact, setAutoCompact] = useState(AUTO_COMPACT_DEFAULT); // compact an agent's conversation when its context is this full (T-74); every open chat is told
   const changeAutoCompact = (pct: number) => { setAutoCompact(pct); void api.setUi({ autoCompact: pct }); window.dispatchEvent(new CustomEvent('cvc-auto-compact', { detail: pct })); };
   // Who is signed in: only a signed-in provider can be chosen for a new session, a move or the default (checked at start and after every sign-in or sign-out).
-  const [signedIn, setSignedIn] = useState<Record<Provider, boolean>>({ claude: true, codex: true });
+  const [signedIn, setSignedIn] = useState<Record<Provider, boolean>>({ claude: true, codex: true, zcode: true });
   useEffect(() => { const check = () => void Promise.all(PROVIDERS.map((p) => window.desktop.accountStatus(p).then((st) => [p, st.signedIn] as const).catch(() => [p, true] as const))).then((all) => setSignedIn(Object.fromEntries(all) as Record<Provider, boolean>)); check(); return window.desktop.onAccountEvent((e) => { if (e.type === 'done') setTimeout(check, 500); }); }, []);
   const [jauvex, setJauvex] = useState<Project | null>(null); const [jauvexSession, setJauvexSession] = useState<string | null>(null); const [jauvexProvider, setJauvexProvider] = useState<Provider | null>(null); const [jauvexMove, setJauvexMove] = useState<'unified' | 'handoff'>('unified'); const [showJauvex, setShowJauvex] = useState(true); const [defaultProvider, setDefaultProvider] = useState<Provider | null>(null); // the Jauvex agent (the app's own folder as a project) and the default agent
   const [infos, setInfos] = useState<Record<string, SessionInfo[]>>({});
@@ -443,7 +443,7 @@ function SessionPicker({ project, all, onClose, onSave }: { project: Project; al
   const [who, setWho] = useState<Provider | 'all'>('all'); // whose sessions: the list holds both providers' sessions for the folder
   const [picked, setPicked] = useState<Set<string>>(new Set(project.sessions));
   const [saving, setSaving] = useState(false);
-  const counts = useMemo(() => ({ claude: (all ?? []).filter((s) => s.provider === 'claude').length, codex: (all ?? []).filter((s) => s.provider === 'codex').length }), [all]);
+  const counts = useMemo(() => ({ claude: (all ?? []).filter((s) => s.provider === 'claude').length, codex: (all ?? []).filter((s) => s.provider === 'codex').length, zcode: (all ?? []).filter((s) => s.provider === 'zcode').length }), [all]);
   const list = useMemo(() => { const n = q.trim().toLowerCase(); return (all ?? []).filter((s) => (who === 'all' || s.provider === who) && (!n || `${s.customTitle ?? ''} ${s.summary} ${s.firstPrompt ?? ''}`.toLowerCase().includes(n))); }, [all, q, who]);
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   return (
@@ -451,10 +451,10 @@ function SessionPicker({ project, all, onClose, onSave }: { project: Project; al
       <div className="modal" role="dialog" aria-label="Add sessions">
         <div className="modal-head"><div><h3>Sessions in {project.name}</h3><p>{project.path}</p></div><button className="icon-btn" onClick={onClose}><X size={16} /></button></div>
         <div className="modal-search"><Search size={15} /><input autoFocus placeholder="Search sessions" value={q} onChange={(e) => setQ(e.target.value)} />
-          <span className="who">{([['all', 'All', counts.claude + counts.codex], ['claude', 'Claude', counts.claude], ['codex', 'Codex', counts.codex]] as const).map(([k, label, n]) => <button key={k} className={who === k ? 'on' : ''} title={k === 'all' ? 'Sessions of both providers' : `${label} sessions only`} onClick={() => setWho(k)}>{k !== 'all' && <ProviderIcon provider={k} size={11} />}{label}{all ? <em>{n}</em> : null}</button>)}</span></div>
+          <span className="who">{([['all', 'All', counts.claude + counts.codex + counts.zcode], ['claude', 'Claude', counts.claude], ['codex', 'Codex', counts.codex], ...(counts.zcode ? [['zcode', 'ZCode', counts.zcode]] as const : [])] as const).map(([k, label, n]) => <button key={k} className={who === k ? 'on' : ''} title={k === 'all' ? 'Sessions of every provider' : `${label} sessions only`} onClick={() => setWho(k)}>{k !== 'all' && <ProviderIcon provider={k} size={11} />}{label}{all ? <em>{n}</em> : null}</button>)}</span></div>
         <div className="modal-list">
           {!all && <p className="modal-empty">Loading…</p>}
-          {all && list.length === 0 && <p className="modal-empty">{q.trim() ? 'No session matches.' : who === 'all' ? 'Neither Claude nor Codex has sessions for this folder yet.' : `${PROVIDER_LABEL[who]} has no sessions for this folder yet.`}</p>}
+          {all && list.length === 0 && <p className="modal-empty">{q.trim() ? 'No session matches.' : who === 'all' ? 'No provider has sessions for this folder yet.' : `${PROVIDER_LABEL[who]} has no sessions for this folder yet.`}</p>}
           {list.map((s) => (
             <button key={s.sessionId} className={`pick${picked.has(s.sessionId) ? ' on' : ''}`} onClick={() => toggle(s.sessionId)}>
               <span className="box">{picked.has(s.sessionId) && <Check size={12} strokeWidth={3} />}</span>
@@ -559,7 +559,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
   const [effort, setEffort] = useState(() => kept?.effort ?? localStorage.getItem(effortKey(provider)) ?? '');
   const prefs = useRef({ model, effort, permissions }); prefs.current = { model, effort, permissions };
   const keep = (patch: Partial<SessionPrefs>) => { prefs.current = { ...prefs.current, ...patch }; if (sid.current) void api.setPrefs(project.id, sid.current, prefs.current).catch(() => { /* kept for this window at least */ }); };
-  const efforts = provider === 'codex' ? (codexModels.find((m) => (model ? m.id === model : m.isDefault))?.efforts ?? []) : CLAUDE_EFFORTS;
+  const efforts = provider === 'codex' ? (codexModels.find((m) => (model ? m.id === model : m.isDefault))?.efforts ?? []) : provider === 'zcode' ? [] : CLAUDE_EFFORTS;
   const pickProvider = (p: Provider) => { setProvider(p); localStorage.setItem('cvc.provider', p); setModel(localStorage.getItem(modelKey(p)) ?? ''); setEffort(localStorage.getItem(effortKey(p)) ?? ''); };
   const chatId = useRef(adopt ?? crypto.randomUUID()); // a reloaded window takes a running turn back under its old id
   const sid = useRef<string | null>(sessionId);
@@ -991,7 +991,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
             </div>
           </div>}
       <Composer context={sid.current || ctx ? { usage: ctx, compacting, autoPct, hasSession: !!sid.current, last: lastCompact, onCompact: () => { if (!startCompactRef.current('manual')) setNote(v.current.running ? 'The conversation can be compacted once this turn is over.' : 'Nothing to compact yet: this session has no conversation.'); } } : undefined} draftKey={storeKey} signedIn={signedIn} usageTick={turns} usageModel={model || mainModel.current || ''} jev={jev} running={running} disabled={state !== 'ready'} provider={provider} onProvider={hybrid ? (running ? undefined : switchProvider) : !embed && !sessionId && !sid.current && messages.length === 0 && !running ? pickProvider : undefined}
-        models={provider === 'codex' ? codexModels : CLAUDE_MODELS} model={model} onModel={(m) => { setModel(m); localStorage.setItem(modelKey(provider), m); keep({ model: m }); }}
+        models={provider === 'codex' ? codexModels : provider === 'zcode' ? [] : CLAUDE_MODELS} model={model} onModel={(m) => { setModel(m); localStorage.setItem(modelKey(provider), m); keep({ model: m }); }}
         permissions={permissions} onPermissions={(p) => { setPermissions(p); localStorage.setItem('cvc.permissions', p); keep({ permissions: p }); }}
         efforts={efforts} effort={effort} onEffort={(e) => { setEffort(e); localStorage.setItem(effortKey(provider), e); keep({ effort: e }); }} onSend={(t, images) => void send(t, false, undefined, false, images)} onStop={() => { hush(); v.current.stopped = true; void window.desktop.chatStop(chatId.current); }}
         voice={{ muteIn, on: voiceOn, phase, status: vstatus, cfg, level, micMuted, speakerOff, toggle: () => void toggleVoice(), toggleMic, toggleSpeaker, hush, save: saveCfg, test: () => { if (v.current.engine) enqueue(say('This is the voice. If you hear this, the speaker is right.'), v.current.gen); } }}
@@ -1241,7 +1241,7 @@ function VoiceModelPick({ provider, value, options, onChange }: { provider: Prov
   const [inUse, setInUse] = useState(''); const [list, setList] = useState(options);
   useEffect(() => { let alive = true; void window.desktop.voiceModelInUse(provider, value).then((m) => { if (alive) setInUse(m); }).catch(() => {}); return () => { alive = false; }; }, [provider, value, list]);
   // The live list can still be on its way when the panel opens (it is asked once per run): keep looking for it a few seconds.
-  useEffect(() => { if (options.length) { setList(options); return; } let alive = true; let tries = 0; const look = () => { void window.desktop.voiceStatus().then((st) => { if (!alive) return; const l = st.voiceModels[provider]; if (l.length) setList(l); else if (tries++ < 14) setTimeout(look, 700); }).catch(() => {}); }; look(); return () => { alive = false; }; }, [provider, options]);
+  useEffect(() => { if (options.length) { setList(options); return; } let alive = true; let tries = 0; const look = () => { void window.desktop.voiceStatus().then((st) => { if (!alive) return; const l = st.voiceModels[provider === 'codex' ? 'codex' : 'claude']; if (l.length) setList(l); else if (tries++ < 14) setTimeout(look, 700); }).catch(() => {}); }; look(); return () => { alive = false; }; }, [provider, options]);
   const shown = list.find((o) => o.id === value)?.id ?? list.find((o) => o.resolved === value)?.id ?? ''; const known = !!shown; /* a saved wire id (claude-sonnet-5) shows as the alias that stands for it (sonnet), so the selector never claims automatic while Sonnet is in use */
   return <label>Voice model for {PROVIDER_LABEL[provider]} sessions (acknowledges, then says what happened)<em>in use: {inUse ? (list.find((o) => o.id === inUse) ?? list.find((o) => o.resolved === inUse))?.label ?? inUse : '…'}</em>
     <select value={shown} onChange={(e) => onChange(e.target.value)}><option value="">Automatic (the smallest{list.length ? '' : ', list loading'})</option>{list.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}{value && !known && list.length > 0 && <option value={value} disabled>{value} (not offered any more: automatic is used)</option>}</select></label>;
