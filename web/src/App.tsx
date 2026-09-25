@@ -7,7 +7,7 @@ import { AUTO_COMPACT_CHOICES, AUTO_COMPACT_DEFAULT, autoCompactPct, shouldCompa
 import { Accounts } from './Accounts';
 import { Welcome } from './Welcome';
 import typesafeMark from '../../assets/typesafe.png'; // TypeSafe's mark, on Jev agent rows: whose agent it is, like the provider marks
-import { Copy, EyeOff as HideIcon, Pencil, Bug, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Paperclip, Settings, Move, Keyboard, ChevronRight, Eye, EyeOff, FolderPlus, Folder, FolderOpen, Laptop, Mic, PanelLeft, Plus, RotateCw, Search, SlidersHorizontal, Settings2, Square, SquarePen, Trash2, Clapperboard, MicOff, Volume2, VolumeX, AudioLines, Wrench, Brain, X, Check, ShieldQuestion } from 'lucide-react';
+import { Copy, EyeOff as HideIcon, Pencil, Bug, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Paperclip, Settings, Move, Keyboard, ChevronRight, Eye, EyeOff, FolderPlus, Folder, FolderOpen, Laptop, Mic, PanelLeft, Plus, RotateCw, Search, SlidersHorizontal, Settings2, Square, SquarePen, Trash2, Clapperboard, Briefcase, Globe, MicOff, Volume2, VolumeX, AudioLines, Wrench, Brain, X, Check, ShieldQuestion } from 'lucide-react';
 import { md } from './md';
 import { Pane, type PaneTarget } from './Pane';
 import { findAgents, shortIds, shortTitle } from '../../shared/roster';
@@ -51,6 +51,12 @@ function Mark({ busy = false }: { busy?: boolean }) {
     </svg>
   );
 }
+
+/** Pages of the tools beside the app (their own servers on this machine): Paperclip's dashboard, jev-ultrafast's inspector. */
+const TOOL_PAGES = {
+  paperclip: { name: 'Paperclip', url: 'http://127.0.0.1:3100', title: 'Paperclip: goals, issues and approvals for the agents (its dashboard, in the right pane)', start: 'Start it with npx paperclipai onboard --yes (on Windows the setup starts it), and connect this app once: node scripts/paperclip.ts connect' },
+  browser: { name: 'Browser agent', url: 'http://127.0.0.1:8766', title: "The browser agent's inspector (jev-ultrafast): the elements it sees, its choices, step by step", start: 'Start it in the jev-ultrafast folder: uv run jev' },
+} as const;
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -145,6 +151,8 @@ export default function App() {
     const next = { ...opencut }; if (patch.url !== undefined) { const a = opencutAddress(patch.url); if (!a.ok) return a; next.url = a.url; }
     if (patch.folder !== undefined) { const f = patch.folder.trim(); if (f) { try { const pr = await api.addProject(f); next.folder = pr.path; await refresh(); } catch (e) { return { ok: false, error: (e as Error).message }; } } else delete next.folder; } /* its folder is a folder like any other: the agents work on OpenCut there */
     setOpencut(next); await api.setUi({ opencut: next }); return { ok: true, url: opencutUrl(next.url), ...(next.folder ? { folder: next.folder } : {}) }; };
+  // Tools beside the app with a page of their own (README): opened in this session's pane, or a note on how to start them.
+  const openTool = async (id: keyof typeof TOOL_PAGES) => { const t = TOOL_PAGES[id]; const up = await api.opencutUp(t.url).catch(() => false); setPane({ kind: 'url', url: t.url, tool: id, ...(up ? {} : { down: `${t.name} does not answer at ${t.url}. ${t.start}, then try again.` }) }); return up; };
   const openLinkRef = useRef(openLink); openLinkRef.current = openLink;
   useEffect(() => window.desktop.onPaneOpen((url) => openLinkRef.current(url, '')), []); /* the window was asked to navigate away (a link the app did not catch): the pane takes it */
   useEffect(() => { const w = Number(localStorage.getItem('cvc.pane.w')); if (w >= 320) document.documentElement.style.setProperty('--pane-w', `${w}px`); }, []);
@@ -319,6 +327,8 @@ export default function App() {
           <div className="side-grip" title="Drag to resize" onPointerDown={onSideGrip} />
           <nav className="side-nav">
             <button className="nav-item" onClick={() => void addFolder()}><span className="nav-ico"><FolderPlus size={16} /></span>Add folder</button>
+            <button className="nav-item" title={TOOL_PAGES.paperclip.title} onClick={() => void openTool('paperclip')}><span className="nav-ico"><Briefcase size={16} /></span>Paperclip</button>
+            <button className="nav-item" title={TOOL_PAGES.browser.title} onClick={() => void openTool('browser')}><span className="nav-ico"><Globe size={16} /></span>Browser agent</button>
             <button className="nav-item" title={`OpenCut, the video editor, in the right pane (${opencutUrl(opencut.url)}; it runs on its own: see the settings)`} onClick={() => void openOpencut()}><span className="nav-ico"><Clapperboard size={16} /></span>OpenCut</button>
           </nav>
           <div className="side-scroll">
@@ -358,7 +368,7 @@ export default function App() {
         {sel && project ? null
           : <div className="empty"><Mark /><h2>Pick a session</h2><p>Add a folder, choose which of its Claude and Codex sessions to keep in the sidebar, then open one and keep talking, or start a new one with either.</p></div>}
       </main>
-      {pane && <Pane target={pane} onClose={() => setPane(null)} onRetry={pane.kind === 'url' && pane.sound ? () => void openOpencut() : undefined} />}
+      {pane && <Pane target={pane} onClose={() => setPane(null)} onRetry={pane.kind === 'url' && pane.tool && pane.tool in TOOL_PAGES ? () => void openTool(pane.tool as keyof typeof TOOL_PAGES) : pane.kind === 'url' && pane.sound ? () => void openOpencut() : undefined} />}
 
       {debugOpen && <DebugPanel onClose={() => { localStorage.setItem('cvc.debug', '0'); setDebugOpen(false); }} />}
       {picker && <SessionPicker project={picker} all={infos[picker.id]} onClose={() => setPicker(null)} onSave={async (ids) => { const byId = new Map((infos[picker.id] ?? []).map((s) => [s.sessionId, s.provider])); await api.setSessions(picker.id, ids, Object.fromEntries(ids.filter((id) => byId.has(id)).map((id) => [id, byId.get(id)!]))); setPicker(null); await refresh(); }} />}

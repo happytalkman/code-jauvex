@@ -11,6 +11,8 @@ import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import * as claw from './claw.js';
 import * as graphdb from './graphdb.js';
+import * as paperclip from './paperclip.js';
+import { paperclipReadTool } from '../shared/paperclip.js';
 import { browseSetup, runBrowse } from '../shared/browse.js';
 import { typesafeKey } from './jev.js';
 import os from 'node:os';
@@ -50,7 +52,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   const entry: Live = { projectId: req.projectId, sessionId: req.sessionId, push: (text, images) => { steers.push(Date.now()); inbox.push(user(text, images)); wake?.(); }, q: undefined as unknown as Query, abort, pending: new Map(), always: new Set() };
 
   const canUseTool: CanUseTool = (toolName, input, opts) => new Promise<PermissionResult>((resolve) => {
-    if (entry.always.has(toolName) || toolName.startsWith('mcp__jauvex__')) return resolve({ behavior: 'allow', updatedInput: input }); /* the app's own tools (message_agent, list_agents) never ask: they only reach the app's router */
+    if (entry.always.has(toolName) || (toolName.startsWith('mcp__jauvex__') && toolName !== 'mcp__jauvex__browse') || paperclipReadTool(toolName)) return resolve({ behavior: 'allow', updatedInput: input }); /* browse acts on real sites, and Paperclip's writes change its company: those ask */ /* the app's own tools (message_agent, list_agents) never ask: they only reach the app's router */
     const requestId = randomUUID();
     const finish = (d: PermissionDecision) => {
       entry.pending.delete(requestId);
@@ -63,6 +65,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
     send({ chatId, type: 'permission', requestId, toolName, input });
   });
 
+  const pcServer = await paperclip.mcpServer().catch(() => null);
   entry.q = query({
     prompt: input(),
     options: {
@@ -78,7 +81,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
       permissionMode: req.permissions === 'auto' ? 'auto' : 'default',
       canUseTool,
       abortController: abort,
-      mcpServers: { jauvex: jauvexTools(chatId) }, // message_agent and list_agents: the app's own channel between agents, as a tool
+      mcpServers: { jauvex: jauvexTools(chatId), ...(pcServer ? { paperclip: pcServer } : {}) }, // paperclip: its own MCP server, when it runs and this app is connected (electron/paperclip.ts); // message_agent and list_agents: the app's own channel between agents, as a tool
     },
   });
   live.set(chatId, entry);

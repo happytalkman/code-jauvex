@@ -151,6 +151,31 @@ briefing says so (one narrow goal per run; check the last page it reports, since
   environment, against a local page in headless Chromium (`BU_CDP_URL`): it connected, read the page and asked TypeSafe, which refused
   the placeholder key (a real run needs the user's keys).
 
+## Paperclip beside the app
+
+[Paperclip](https://github.com/paperclipai/paperclip) (MIT) runs teams of AI agents like a company: goals, projects, issues, comments,
+approvals and budgets, on a dashboard. It runs on its own (`npx paperclipai onboard --yes`: trusted local mode on
+`http://127.0.0.1:3100`, its own embedded Postgres, Node 24.11 or newer), and nothing of it is copied here. The sidebar's Paperclip item
+opens its dashboard in the right pane (or says how to start it), and this app's agents work with it:
+
+- `node scripts/paperclip.ts connect [--company "<name>"]`, once: this app joins that company (the only one, or the one named, made if
+  new) as an agent named Jauvex, paused so Paperclip never runs it itself (it has no command to run: a task assigned to it once ended in
+  a failed run, "Process adapter missing command"), and keeps the API key Paperclip issues in `<home>/.jauvex/paperclip/api-key`
+  (owner-only; sent, never printed). `status` says whether it runs and which company this app is in.
+- Claude sessions get Paperclip's own MCP server (`@paperclipai/mcp-server`, pinned) when Paperclip answers and the app is connected:
+  its read tools (list, get) pass, the ones that change anything ask the user first. Every session can run
+  `node scripts/paperclip.ts <GET|POST|PATCH|DELETE> /api/... [json]` (`{companyId}` is filled in).
+- Paperclip lets an agent open issues with its key, but a comment or a status change only inside a heartbeat run Paperclip started for
+  it (403 "Cross-issue writes need a run", 401 "Agent run id required"), even on its own issue. In trusted local mode a request without a
+  key is the board (the user), so `scripts/paperclip.ts` sends such a write again that way, the text marked `[from Jauvex]`, and says so.
+  The briefing tells the agents to post comments and status changes that way. (Paperclip waking this app's agents itself, as it does
+  its own adapters, is a larger piece not built here.)
+- Checks: `tests/paperclip.test.ts` on a stand-in Paperclip. The real one (2026.916.1) was installed here and driven: connect, reading
+  issues, opening one, a comment and a status change as the board, its MCP server's 44 tools with the kept key, its dashboard in the pane.
+
+The sidebar's **Browser agent** item opens jev-ultrafast's inspector (`uv run jev` in its folder: `http://127.0.0.1:8766`), which shows
+the elements it sees and its choices, step by step.
+
 ## Setting up on a fresh Mac
 
 Jauvex needs a few things that are not in this repository; the install command and `npm start` take care of most of them. The welcome screen (on the first start, and from Jauvex

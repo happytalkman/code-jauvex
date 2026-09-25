@@ -8,7 +8,7 @@ import { md } from './md';
 // images as data), pages and PDFs in a <webview> of their own, muted from the start. Later: terminals, browsers.
 // sound: a page that may play (OpenCut, the video editor: shared/opencut.ts); every other page stays muted. down: why it is not shown.
 // In a browser (the web version) there is no <webview>: pages open in an iframe, and one that forbids framing shows the browser's refusal.
-export type PaneTarget = { kind: 'file'; path: string } | { kind: 'url'; url: string; sound?: boolean; down?: string };
+export type PaneTarget = { kind: 'file'; path: string } | { kind: 'url'; url: string; sound?: boolean; down?: string; tool?: string }; // tool: a page of a tool beside the app (App.tsx TOOL_PAGES), which Try again reopens
 const dirOf = (p: string) => p.replace(/\/[^/]*$/, '');
 
 export function Pane({ target, onClose, onRetry }: { target: PaneTarget; onClose: () => void; onRetry?: () => void }) {
