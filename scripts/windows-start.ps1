@@ -15,7 +15,9 @@ $branch = if ($env:JAUVEX_BRANCH) { $env:JAUVEX_BRANCH } else { 'claude/awesome-
 function Say($t) { Write-Host "`n== $t" -ForegroundColor Cyan }
 function Fail($t) { Write-Host "`n$t" -ForegroundColor Red; if (-not $env:CI) { Read-Host 'Press Enter to close' }; exit 1 }
 function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
-function Refresh-Path { $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') }
+# what an install added to the PATH, after what this window has: rebuilt from the registry alone, the machine's older Node came first
+# again (the Windows check: after uv, Paperclip ran on Node 22 from C:\Program Files\nodejs while Node 24 had been chosen)
+function Refresh-Path { $have = $env:Path -split ';' | Where-Object { $_ }; $new = ([Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')) -split ';' | Where-Object { $_ -and ($have -notcontains $_) }; $env:Path = (@($have) + @($new)) -join ';' }
 function Install-WithWinget($id, $what) { # not named Winget: PowerShell names ignore case, and winget inside it then called itself until the call depth overflowed
   if (-not (Has 'winget')) { Fail "$what is missing and winget is not here to install it. Install $what yourself, then run this again." }
   Say "Installing $what (winget)"; winget.exe install --id $id -e --source winget --accept-package-agreements --accept-source-agreements
@@ -131,6 +133,7 @@ if ($withPaperclip) {
       $pcArgs = if ($first) { @('-y', 'paperclipai@latest', 'onboard', '--yes', '--no-install-service') } else { @('-y', 'paperclipai@latest', 'run') }
       # with the Node this setup checked: a bare npx.cmd can be an older install's, which always runs the node beside it (the Windows
       # check: Paperclip refused to start on Node 22.23 from C:\Program Files\nodejs while Node 24 came first on the PATH)
+      if (-not (Node-Ok)) { throw "Paperclip needs Node.js $nodeMin or newer; node is $(node -v)" }
       $nodeExe = (Get-Command node).Source; $npxCli = Join-Path (Split-Path $nodeExe) 'node_modules\npm\bin\npx-cli.js'
       Start-Process -FilePath $nodeExe -ArgumentList (@("`"$npxCli`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
       for ($i = 0; $i -lt 180 -and -not (& $up); $i++) { Start-Sleep 2 } # the first time: npm fetches it and its database is made
