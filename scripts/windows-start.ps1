@@ -129,7 +129,10 @@ if ($withPaperclip) {
       Say "Starting Paperclip$(if ($first) { ' (the first time: its setup and database, a minute or two)' })"
       $log = Join-Path $HOME '.jauvex\paperclip.log'; New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
       $pcArgs = if ($first) { @('-y', 'paperclipai@latest', 'onboard', '--yes', '--no-install-service') } else { @('-y', 'paperclipai@latest', 'run') }
-      Start-Process -FilePath 'npx.cmd' -ArgumentList $pcArgs -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
+      # with the Node this setup checked: a bare npx.cmd can be an older install's, which always runs the node beside it (the Windows
+      # check: Paperclip refused to start on Node 22.23 from C:\Program Files\nodejs while Node 24 came first on the PATH)
+      $nodeExe = (Get-Command node).Source; $npxCli = Join-Path (Split-Path $nodeExe) 'node_modules\npm\bin\npx-cli.js'
+      Start-Process -FilePath $nodeExe -ArgumentList (@("`"$npxCli`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
       for ($i = 0; $i -lt 180 -and -not (& $up); $i++) { Start-Sleep 2 } # the first time: npm fetches it and its database is made
     }
     if (& $up) {
