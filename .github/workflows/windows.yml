@@ -17,6 +17,7 @@ jobs:
     env:
       JAUVEX_BRANCH: ${{ github.ref_name }}
       JAUVEX_NO_START: '1'
+      JAUVEX_WEAIDDB: '0'  # a Linux container: this runner's Docker runs Windows ones (.github/workflows/weaiddb.yml checks it)
     steps:
       - if: matrix.node != 'as-it-comes'
         uses: actions/setup-node@v4

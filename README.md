@@ -111,6 +111,27 @@ Links to this machine's own servers (http://localhost and the like) may now open
 may not (`externalOk` in `shared/opencut.ts`). Checks: `tests/opencut.test.ts` (the address, the links, the page's frame rule),
 `tests/web.test.ts` (the probe), `tests/window/opencut.test.ts` (the item, the pane, the sound, the folder).
 
+## WEAIDdb, a graph database for the agents
+
+[WEAIDdb](https://github.com/happytalkman/WEAIDdb) (a fork of HydraDB: a distributed graph database in Rust, queried with OpenCypher,
+Neo4j-compatible over Bolt, AGPL-3.0) runs beside the app, and every agent can use it to keep and query what is worth remembering as
+nodes and relationships. Nothing of it is copied here (the AGPL would then cover the app): it runs on its own, and the app talks to its
+HTTP API (`POST /v1/graphs/{graph}/query`, a bearer token, the `x-graph-namespace` header, one cell).
+
+- Claude sessions have the `graph_query` tool (the app's in-process MCP server, next to `message_agent`); every session, whatever its
+  provider, can run `node scripts/graph.ts "<cypher>" [--params '{"k":"v"}']`, and `node scripts/graph.ts status`. The briefing tells each
+  agent so, and to keep a `project` property on what it writes (they share one graph). Values go as parameters, never pasted into the query.
+- Settings: `data/weaiddb.json` (url, admin, tokenFile, namespace, graph, cell; defaults: a local development node,
+  `http://127.0.0.1:8443`, admin `:9090`). The token is the file the node was started with, `<home>/.jauvex/weaiddb/auth-token`; it is
+  read only to send it.
+- Running it: `scripts/weaiddb.ps1 setup | start | stop | status` clones the fork into `<home>/weaiddb`, builds the image with the fork's
+  own Dockerfile (the first build takes 15-30 minutes; later, only when the fork moved), and starts one plaintext node bound to 127.0.0.1,
+  its data and a random token in `<home>/.jauvex/weaiddb`. The Windows setup runs it when Docker Desktop is there (`JAUVEX_WEAIDDB=0` leaves
+  it out); Docker Desktop itself is the user's to install. Without Docker, build `graph-node` from source as the fork's README says.
+- Checks: `tests/graph.test.ts` (the request, the answers, the CLI, a node that is down, no token, on a stand-in node);
+  `.github/workflows/weaiddb.yml` builds the image from the fork on a Linux runner, starts it with `scripts/weaiddb.ps1`, and writes and
+  reads a small graph with `scripts/graph.ts`.
+
 ## Setting up on a fresh Mac
 
 Jauvex needs a few things that are not in this repository; the install command and `npm start` take care of most of them. The welcome screen (on the first start, and from Jauvex

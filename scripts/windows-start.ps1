@@ -4,7 +4,7 @@
 # the voice with npm run voice:setup), what is there is kept, and the app starts (npm run web) and opens the browser. Run it again any time:
 # it only does what is still missing, then starts the app. JAUVEX_DIR moves the copy (default: <home>\jauvex), JAUVEX_BRANCH picks the branch,
 # JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml), JAUVEX_ZCODE=0 leaves ZCode out,
-# JAUVEX_CLAW=0 leaves Claw out.
+# JAUVEX_CLAW=0 leaves Claw out, JAUVEX_WEAIDDB=0 leaves WEAIDdb out.
 # ZCode (github.com/zai-org/ZCode), the third agent, is built from its source into <home>\zcode (Node 24, pnpm) and its zcode command
 # put in <home>\.jauvex\bin, on the user's PATH; it is rebuilt only when its source moved. Its sign-in stays the user's: zcode login zai.
 $ErrorActionPreference = 'Stop'
@@ -92,6 +92,16 @@ if ($env:JAUVEX_CLAW -ne '0') {
   }
   if ((Test-Path $clawExe) -and -not $env:ANTHROPIC_API_KEY -and -not [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'User')) { Write-Host 'Claw runs on an Anthropic API key: set it once with  setx ANTHROPIC_API_KEY sk-ant-...  then run this again.' -ForegroundColor Yellow }
   elseif (-not $env:ANTHROPIC_API_KEY) { $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'User') } # set with setx after this window opened: the app started from here sees it
+}
+
+# WEAIDdb (the agents' graph database, scripts/weaiddb.ps1): a Docker container built from the fork. Docker Desktop stays the user's
+# to install; without it the app runs without WEAIDdb and says how. The first build takes 15-30 minutes, later starts seconds.
+if ($env:JAUVEX_WEAIDDB -ne '0') {
+  if (Has 'docker') {
+    Say "WEAIDdb, the agents' graph database (the first build takes 15-30 minutes)"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\weaiddb.ps1') start
+    if ($LASTEXITCODE) { Write-Host 'WEAIDdb is not running (see above); the app runs without it meanwhile. Run this again to retry.' -ForegroundColor Yellow }
+  } else { Write-Host "WEAIDdb (the agents' graph database) runs in Docker: install Docker Desktop (https://www.docker.com/products/docker-desktop/), start it, then run this again." -ForegroundColor Yellow }
 }
 
 # Claude and Codex themselves come with npm install; their command lines are only for signing in (the app signs no one in).

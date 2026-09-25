@@ -1,0 +1,24 @@
+// WEAIDdb from the command line, for any agent (shared/graph.ts; Claude sessions also have the graph_query tool): one OpenCypher query,
+// answered with the node's JSON; `status` says whether the node is up. Settings: data/weaiddb.json; token: <home>/.jauvex/weaiddb/auth-token
+// (WEAIDDB_TOKEN_FILE moves it), read only to send it.
+//   node scripts/graph.ts "MATCH (n) RETURN count(n) AS n"
+//   node scripts/graph.ts "CREATE (:Note {project: $p, text: $t})" --params '{"p":"website","t":"uses Vite"}'
+//   node scripts/graph.ts status
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { graphAnswer, graphConfig, graphRequest, type GraphConfig } from '../shared/graph.ts';
+
+const home = process.env.CVC_JAUVEX_HOME || path.join(os.homedir(), '.jauvex'); const data = process.env.CVC_DATA_DIR || path.join(home, 'personal'); // as electron/paths.ts
+let saved: Partial<GraphConfig> | null = null; try { saved = JSON.parse(readFileSync(path.join(data, 'weaiddb.json'), 'utf8')) as Partial<GraphConfig>; } catch { /* the defaults */ }
+const cfg = graphConfig(saved, process.env.WEAIDDB_TOKEN_FILE || path.join(home, 'weaiddb', 'auth-token'));
+const args = process.argv.slice(2); const at = args.indexOf('--params'); const params = at >= 0 ? args.splice(at, 2)[1] : undefined; const q = args.join(' ').trim();
+if (!q) { console.error('usage: node scripts/graph.ts "<cypher>" [--params \'{"name":"value"}\'] | status'); process.exit(2); }
+if (q === 'status') {
+  try { const r = await fetch(`${cfg.admin}/readyz`, { signal: AbortSignal.timeout(3000) }); console.log(JSON.stringify({ ok: r.ok, url: cfg.url, ready: r.ok })); process.exit(r.ok ? 0 : 1); }
+  catch { console.log(JSON.stringify({ ok: false, url: cfg.url, ready: false, error: 'WEAIDdb does not answer: is it running? On Windows: powershell -File scripts/weaiddb.ps1 start' })); process.exit(1); }
+}
+let parameters: Record<string, unknown> | undefined; if (params !== undefined) { try { parameters = JSON.parse(params) as Record<string, unknown>; } catch { console.error('--params takes a JSON object'); process.exit(2); } }
+let token: string; try { token = readFileSync(cfg.tokenFile, 'utf8').trim(); } catch { console.error(`WEAIDdb is not set up here: no token file at ${cfg.tokenFile}.`); process.exit(1); }
+try { const req = graphRequest(cfg, token, q, parameters); const r = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(40_000) }); const a = graphAnswer(r.status, await r.text()); console.log(a.text); process.exit(a.ok ? 0 : 1); }
+catch (e) { console.error(`WEAIDdb does not answer at ${cfg.url} (${(e as Error).message}).`); process.exit(1); }

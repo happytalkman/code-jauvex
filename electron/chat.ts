@@ -10,6 +10,7 @@ import { autoCompactPct, claudeCompactEnv, claudeUsed, tooLong, type ContextUsag
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import * as claw from './claw.js';
+import * as graphdb from './graphdb.js';
 import { claudeExe } from './account.js';
 
 type Live = { push: (text: string, images?: Attachment[]) => void; q: Query; abort: AbortController; pending: Map<string, (d: PermissionDecision) => void>; always: Set<string>; projectId: string; sessionId: string | null };
@@ -158,6 +159,9 @@ function jauvexTools(chatId: string) {
       { to: z.string().describe("The agent's name, or its id in brackets"), text: z.string().describe('What to tell or ask them: short and self-contained, they see nothing of your conversation') },
       async ({ to, text }) => ({ content: [{ type: 'text' as const, text: await agentRequest(chatId, { type: 'message', to, text }) }] })),
     tool('list_agents', 'The agents in this Jauvex app right now: name, id, provider, folder, working or idle.', {}, async () => ({ content: [{ type: 'text' as const, text: await agentRequest(chatId, { type: 'list' }) }] })),
+    tool('graph_query', 'Run one OpenCypher query on WEAIDdb, the graph database beside this app (shared by every agent): CREATE, MERGE, MATCH ... RETURN. Values go in parameters, referred to as $name in the query. Answers with the rows as JSON, or why there are none (not running, a syntax error).',
+      { query: z.string().describe('One OpenCypher statement, e.g. MATCH (n:Note {project: $p}) RETURN n.text LIMIT 20'), parameters: z.record(z.string(), z.unknown()).optional().describe('Values for the $names in the query') },
+      async ({ query, parameters }) => { const r = await graphdb.query(query, parameters); return { content: [{ type: 'text' as const, text: r.text }], ...(r.ok ? {} : { isError: true }) }; }),
   ] });
 }
 export async function steerChat(chatId: string, text: string, images?: Attachment[]): Promise<boolean> {
