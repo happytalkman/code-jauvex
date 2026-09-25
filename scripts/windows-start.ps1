@@ -3,10 +3,13 @@
 # or, in a copy already here: double-click start-windows.cmd. What is missing is installed (Node and Git with winget, the app's packages,
 # the voice with npm run voice:setup), what is there is kept, and the app starts (npm run web) and opens the browser. Run it again any time:
 # it only does what is still missing, then starts the app. JAUVEX_DIR moves the copy (default: <home>\jauvex), JAUVEX_BRANCH picks the branch,
-# JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml), JAUVEX_ZCODE=0 leaves ZCode out.
+# JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml), JAUVEX_ZCODE=0 leaves ZCode out,
+# JAUVEX_CLAW=0 leaves Claw out.
 # ZCode (github.com/zai-org/ZCode), the third agent, is built from its source into <home>\zcode (Node 24, pnpm) and its zcode command
 # put in <home>\.jauvex\bin, on the user's PATH; it is rebuilt only when its source moved. Its sign-in stays the user's: zcode login zai.
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue' # Windows PowerShell's progress bar slows a download many times over
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 # GitHub needs TLS 1.2
 $repo = 'https://github.com/happytalkman/code-jauvex'
 $branch = if ($env:JAUVEX_BRANCH) { $env:JAUVEX_BRANCH } else { 'claude/awesome-pasteur-ndvvom' }
 function Say($t) { Write-Host "`n== $t" -ForegroundColor Cyan }
@@ -43,10 +46,15 @@ Say 'Installing the app''s packages'; npm.cmd install; if ($LASTEXITCODE) { Fail
 Say 'The voice: whisper-server and the Whisper models (about 250 MB the first time)'
 npm.cmd run voice:setup; if ($LASTEXITCODE) { Write-Host 'The voice is not ready (see above); the app runs by text meanwhile. Run this again later to finish it.' -ForegroundColor Yellow }
 
+# <home>\.jauvex\bin: the zcode and claw commands the setup makes, on the user's PATH (and this window's).
+$bin = Join-Path $HOME '.jauvex\bin'; New-Item -ItemType Directory -Force $bin | Out-Null
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); if (-not (($userPath -split ';') -contains $bin)) { [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User') }
+if (-not (($env:Path -split ';') -contains $bin)) { $env:Path = "$bin;$env:Path" }
+
 # ZCode: its CLI built from its source (about 3 minutes the first time), the zcode command made for it. A failure here leaves the app
 # running without ZCode, and says why.
 if ($withZcode) {
-  $zc = Join-Path $HOME 'zcode'; $bin = Join-Path $HOME '.jauvex\bin'; $cli = Join-Path $zc 'apps\zcode-cli\packages\cli\dist\zcode.cjs'
+  $zc = Join-Path $HOME 'zcode'; $cli = Join-Path $zc 'apps\zcode-cli\packages\cli\dist\zcode.cjs'
   try {
     if (-not (Test-Path (Join-Path $zc 'package.json'))) { Say "Getting ZCode into $zc"; git clone --depth 1 https://github.com/zai-org/ZCode $zc; if ($LASTEXITCODE) { throw 'git clone of ZCode failed' } }
     else { Say 'Bringing ZCode up to date'; git -C $zc pull --ff-only; if ($LASTEXITCODE) { Write-Host 'Could not update ZCode: building the copy as it is.' -ForegroundColor Yellow } }
@@ -60,12 +68,30 @@ if ($withZcode) {
       } finally { Pop-Location }
       Set-Content -Path $stamp -Value $head -Encoding ascii
     } else { Say 'ZCode is built and up to date' }
-    New-Item -ItemType Directory -Force $bin | Out-Null
     Set-Content -Path (Join-Path $bin 'zcode.cmd') -Value "@echo off`r`nnode `"$cli`" %*" -Encoding ascii
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); if (-not (($userPath -split ';') -contains $bin)) { [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User') }
-    if (-not (($env:Path -split ';') -contains $bin)) { $env:Path = "$bin;$env:Path" }
     Write-Host "zcode: $(zcode.cmd --version)"
   } catch { Write-Host "ZCode is not ready ($($_.Exception.Message)); the app runs without it meanwhile. Run this again to retry." -ForegroundColor Yellow }
+}
+
+# Claw (github.com/ultraworkers/claw-code, MIT): claw-code publishes no release, so this repository's release claw-<commit> carries a
+# claw.exe built from that commit (.github/workflows/claw-windows.yml), fetched here and checked by size and SHA-256. It runs on an
+# Anthropic API key (ANTHROPIC_API_KEY), which stays the user's to set.
+if ($env:JAUVEX_CLAW -ne '0') {
+  $clawExe = Join-Path $bin 'claw.exe'; $clawUrl = 'https://github.com/happytalkman/code-jauvex/releases/download/claw-08106b0/claw.exe'
+  $clawSize = 0; $clawSum = '' # pinned once the release is built
+  function Claw-Ok { (Test-Path $clawExe) -and (Get-Item $clawExe).Length -eq $clawSize -and (Get-FileHash $clawExe -Algorithm SHA256).Hash.ToLower() -eq $clawSum }
+  if (-not $clawSum) { Write-Host 'Claw for Windows is not published yet: the app runs without it meanwhile.' -ForegroundColor Yellow }
+  elseif (Claw-Ok) { Say 'Claw is here' }
+  else {
+    Say 'Getting Claw (claw.exe, built from claw-code)'
+    try {
+      $part = "$clawExe.part"; Invoke-WebRequest -UseBasicParsing -Uri $clawUrl -OutFile $part
+      $got = (Get-FileHash $part -Algorithm SHA256).Hash.ToLower(); if ((Get-Item $part).Length -ne $clawSize -or $got -ne $clawSum) { Remove-Item $part -Force; throw "the download does not match its SHA-256 ($got)" }
+      Move-Item $part $clawExe -Force
+    } catch { Write-Host "Claw is not ready ($($_.Exception.Message)); the app runs without it meanwhile. Run this again to retry." -ForegroundColor Yellow }
+  }
+  if ((Test-Path $clawExe) -and -not $env:ANTHROPIC_API_KEY -and -not [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'User')) { Write-Host 'Claw runs on an Anthropic API key: set it once with  setx ANTHROPIC_API_KEY sk-ant-...  then run this again.' -ForegroundColor Yellow }
+  elseif (-not $env:ANTHROPIC_API_KEY) { $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable('ANTHROPIC_API_KEY', 'User') } # set with setx after this window opened: the app started from here sees it
 }
 
 # Claude and Codex themselves come with npm install; their command lines are only for signing in (the app signs no one in).
