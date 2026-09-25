@@ -99,6 +99,8 @@ export async function readiness(): Promise<{ version: string | null; model: stri
     return { version: v, model, ...(model ? {} : { error: 'ZCode has no model to run on: sign in with zcode login, or add a provider with an API key in ZCode.' }) };
   } catch (e) { return { version: v, model: null, error: `ZCode did not answer: ${(e as Error).message}` }; }
 }
+/** ZCode's own record of the tokens used on this Mac (its session database, `usage/stats`): the summary, per model and per day. */
+export function usageStats(range: '7d' | '30d' | 'all', timeZone?: string): Promise<unknown> { return call('usage/stats', { range, ...(timeZone ? { timeZone } : {}) }); }
 /** A folder in the protocol's terms: a local folder is its own key (ZCode's buildWorkspaceRef). */
 const workspace = (dir: string): Workspace => ({ workspacePath: dir, workspaceKey: dir });
 

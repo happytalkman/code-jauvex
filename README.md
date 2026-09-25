@@ -533,7 +533,10 @@ Press the white round button in the message box. All local except the two Claude
   session, nothing kept in ZCode's history, the model picked in the voice settings (`provider/model`) or else the model of the last ZCode
   session here (the protocol lists no models, so the choices are the ones ZCode sessions ran on here). The server runs its requests one at
   a time, so a voice line asked during a turn holds a steer for as long as it takes. ZCode says its `session/*` methods go once its v4
-  protocol is the only one: that update moves this file to `v4/*`. Not there yet: the usage battery.
+  protocol is the only one: that update moves this file to `v4/*`. The usage battery has no level for ZCode: API-key providers have no
+  plan limit, and a Coding Plan's quota comes from ZCode's account service, which only its desktop host reaches. It shows "no limit"
+  (∞), and its panel says in words what ZCode recorded of this Mac (`usage/stats`, the last 7 days): the tokens and turns, the model
+  used most, and today's tokens.
   "Signed in" (the welcome's ZCode row, the accounts panel, the provider pickers) means ready: the `zcode` command answers and a new
   session would have a model to run on. The app asks with a draft session (`persistence: deferred`: ZCode keeps nothing of it until a
   first message, and none is sent) and closes it at once; ZCode's config and keys are never read. The row is optional, like Jev's. By

@@ -113,5 +113,9 @@ await backend.rename(p.id, sid, 'Billing page');
 const renamed = (await backend.sessions(p.id)).find((x) => x.sessionId === sid);
 check('a ZCode session can be renamed, and keeps the name', renamed?.customTitle === 'Billing page' && renamed.summary === 'Billing page', JSON.stringify(renamed));
 
+// usage: ZCode's own record of this Mac's tokens, in words; no plan windows
+const usage = await import('../electron/usage.ts'); const u = await usage.get('zcode', true);
+check('ZCode usage: the tokens of the turns run here, no plan windows', u.available && u.windows.length === 0 && /^Last 7 days on this Mac: \d+K tokens in \d+ turns\.$/.test(u.notes?.[0] ?? '') && (u.notes ?? []).some((x) => /^Today: \d+K tokens\.$/.test(x)), JSON.stringify(u));
+
 zcode.shutdown(); codex.shutdown();
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);

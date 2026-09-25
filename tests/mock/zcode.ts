@@ -109,6 +109,12 @@ const methods = {
   'workspace/generateText': (p) => ({ text: `(mock ZCode voice ${p.selection.providerId}/${p.selection.modelId}) ${String(p.messages?.at(-1)?.content ?? p.prompt ?? '').replace(/\s+/g, ' ').slice(0, 60)}`, selection: p.selection, finishReason: 'stop' }),
   'workspace/cancelGenerateText': (p) => ({ operationId: p.operationId, cancelled: false }),
   'session/close': (p) => { const s = live(p.sessionId); if (p.expectedPersistence === 'deferred' && !s.deferred) return { closed: false }; loaded.delete(p.sessionId); subscribed.delete(p.sessionId); if (s.deferred) sessions.delete(p.sessionId); return { closed: true }; },
+  'usage/stats': (p) => { // its own record, counted from the turns it ran: 1000 tokens each, on the session's model, on the day it ran
+    const since = Date.now() - 7 * 86_400_000; const turns = [...sessions.values()].flatMap((s) => s.messages.filter((m) => m.info.role === 'user' && m.info.time.created >= since).map((m) => ({ model: `${s.session.model?.providerId}/${s.session.model?.modelId}`, date: new Date(m.info.time.created).toLocaleDateString('en-CA', { timeZone: p.timeZone }) })));
+    const byModel = new Map(); const byDay = new Map(); for (const t of turns) { byModel.set(t.model, (byModel.get(t.model) ?? 0) + 1000); byDay.set(t.date, (byDay.get(t.date) ?? 0) + 1000); }
+    const total = turns.length * 1000;
+    return { range: p.range, generatedAt: Date.now(), timeZone: p.timeZone ?? 'UTC', source: 'agent-db', summary: { totalTokens: total, totalTurns: turns.length }, heatmap: {}, dailyModelUsage: [...byDay].map(([date, n]) => ({ date, models: [{ modelId: 'mock/mock-1', totalTokens: n }] })), models: [...byModel].map(([modelId, n]) => ({ modelId, totalTokens: n, inputTokens: n, outputTokens: 0, requestCount: n / 1000, share: total ? n / total : 0 })), tools: [] };
+  },
   'session/stop': (p) => { const r = running.get(p.sessionId); if (r) r.cut = true; return {}; },
   'session/compact': (p) => {
     const s = live(p.sessionId); if (running.has(p.sessionId)) throw fail(-32010, 'A prompt is already running for this session');

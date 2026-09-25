@@ -2,7 +2,7 @@
 // counts only while the model is in use: Claude's Fable week, a Codex model's extra limit), the plan, extra usage and credits, and
 // the words the panel says (shared/usage.ts).
 import path from 'node:path'; process.env.CVC_ROOT = path.resolve('.'); process.env.CVC_DATA_DIR ??= path.resolve('tmp/testdata');
-const { claudeFromUsage, codexFromLimits } = await import('../electron/usage.ts');
+const { claudeFromUsage, codexFromLimits, zcodeFromStats } = await import('../electron/usage.ts');
 const { planName, resetText, usageLevel, windowWords } = await import('../shared/usage.ts');
 let failed = 0; const check = (name: string, ok: boolean, got = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok || !got ? '' : `: ${got}`}`); if (!ok) failed++; };
 const now = Date.parse('2026-09-23T16:00:00Z'); const iso = (m: number) => new Date(now + m * 60_000).toISOString(); const clock = (_at: number, far: boolean) => (far ? 'Sun 19:00' : '18:14');
@@ -30,4 +30,10 @@ check('minutes only, and a reset that has come', resetText(now + 9 * 60_000, now
 check('the battery\'s colours: green, amber from 40 % left, red from 15 %', usageLevel(41) === 'ok' && usageLevel(40) === 'mid' && usageLevel(16) === 'mid' && usageLevel(15) === 'low');
 check('plans read for a person', planName('max') === 'Max' && planName('pro') === 'Pro' && planName('team_plus') === 'Team plus');
 
+// ZCode (API-key providers, no plan limit): no windows, its own record of the tokens in words.
+const z = zcodeFromStats({ summary: { totalTokens: 8_400_000, totalTurns: 120 }, models: [{ modelId: 'zhipu/glm-5', totalTokens: 6_000_000, share: 0.714 }, { modelId: 'openai/gpt-6', totalTokens: 2_400_000, share: 0.286 }], dailyModelUsage: [{ date: '2026-09-22', models: [{ totalTokens: 900_000 }] }, { date: '2026-09-23', models: [{ totalTokens: 1_000_000 }, { totalTokens: 200_000 }] }] }, now, '2026-09-23');
+check('ZCode: available, no windows (no plan limit)', z.available && z.windows.length === 0, JSON.stringify(z));
+check('ZCode: the week, the model used most, today, and why there is no limit', JSON.stringify(z.notes) === JSON.stringify(['Last 7 days on this Mac: 8.4M tokens in 120 turns.', 'Most of it on zhipu/glm-5 (71 %).', 'Today: 1.2M tokens.', 'No plan limit here: ZCode runs on providers with an API key, billed by the provider.']), JSON.stringify(z.notes));
+const z0 = zcodeFromStats({ summary: { totalTokens: 0, totalTurns: 0 }, models: [], dailyModelUsage: [] }, now, '2026-09-23');
+check('ZCode: a quiet week says so', z0.notes?.[0] === 'No ZCode turns on this Mac in the last 7 days.' && z0.notes.length === 2, JSON.stringify(z0.notes));
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);
