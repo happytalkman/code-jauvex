@@ -29,12 +29,12 @@ ad hoc on your Mac).
 
 ## The web version (Windows)
 
-Where the desktop app does not run, the same app runs in a browser, text only (no voice yet: it needs `say` and whisper-server, on a
-Mac). On Windows, with Node 22.18 or newer and Git:
+Where the desktop app does not run, the same app runs in a browser, by text and by voice. On Windows, with Node 22.18 or newer and Git:
 
 ```
 git clone <this repository> jauvex && cd jauvex
 npm install
+npm run voice:setup   # once, for the voice: whisper-server and the two Whisper models (about 250 MB)
 npm run web
 ```
 
@@ -51,7 +51,19 @@ IPC does not: the window says which arguments were undefined and the server rest
 showed an empty page. It listens on 127.0.0.1 only; every call needs the token of this run, and a request whose Host is not this machine's
 is refused (no other site reaches it by DNS tricks). One copy per data folder, like the desktop app: a lock (`web.lock`, with its pid) and
 no start while the desktop app holds that folder. `CVC_WEB_PORT` moves it off 4343, `CVC_WEB_OPEN=0` does not open the browser. Not in
-the web version: the voice, the floating voice bar, pages and PDFs in the right pane, opening a file with the system. `scripts/jauvex.ts`
+the web version: the floating voice bar, pages and PDFs in the right pane, opening a file with the system.
+
+The voice in the web version is the desktop's, with the microphone in the browser: the tab listens (the same VAD, `web/src/voice.ts`; the
+browser asks for the microphone once, and 127.0.0.1 counts as a secure page), the server hears and speaks. A recording travels to the server
+as base64 inside the JSON call and a spoken line comes back the same way (`packBinary` in `shared/web.ts`), byte for byte. Hearing is the
+same whisper-server: `npm run voice:setup` fetches whisper.cpp's own Windows build (pinned to v1.8.7 by size and SHA-256; later releases
+publish no Windows zip) into `whisper/`, unpacks it with Node alone, and fetches the models `scripts/models.sh` lists, each checked, a cut
+download never kept. Speaking on Windows is the system's own voice: System.Speech through PowerShell renders each line to a WAV file on the
+server, as `say` does on a Mac, so the voice stays the system's default (Settings > Time & language > Speech) and a line can still be cut
+short when the user speaks. The browser's speechSynthesis was not used: it plays but gives no audio back, and the voice channel needs the
+audio (its length, the cut when the user talks). `tests/web.test.ts` runs the voice on stand-ins (`tests/mock/whisper-server`,
+`tests/mock/say`), `tests/voice-setup.test.ts` the setup on zips it builds (a cut download, a wrong checksum and a path outside the folder
+are refused). `scripts/jauvex.ts`
 works as with the desktop app while a browser tab is open. On Windows, Claude and Codex come from their own Windows packages
 (`claude-agent-sdk-win32-*`, `codex-win32-*`, installed by `npm install`), and ZCode's `zcode.cmd` is started through the shell.
 

@@ -4,7 +4,10 @@
 // Every call carries the token the server printed; it comes in the URL once, and is kept for this tab (sessionStorage).
 
 import type { Attachment } from '../../shared/types';
-import { undefinedArgs } from '../../shared/web';
+import { packBinary, undefinedArgs, unpackBinary, type B64 } from '../../shared/web';
+
+// Base64 in the browser, in chunks (a recording is a few hundred KB; one String.fromCharCode call with all of it overflows the stack).
+const b64: B64 = { to: (u) => { let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); }, from: (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0)) };
 
 type Listener = (payload: unknown) => void;
 
@@ -16,9 +19,9 @@ export function installWebDesktop(): void {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- each channel's own type is the preload's, declared in api.ts
   const rpc = async (name: string, ...args: unknown[]): Promise<any> => {
-    const r = await fetch('/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jauvex-token': token }, body: JSON.stringify({ name, args, undef: undefinedArgs(args) }) }); // JSON turns an undefined argument into null; the IPC keeps it undefined (shared/web.ts)
+    const r = await fetch('/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jauvex-token': token }, body: JSON.stringify({ name, args: args.map((a) => packBinary(a, b64)), undef: undefinedArgs(args) }) }); // JSON turns an undefined argument into null; the IPC keeps it undefined (shared/web.ts)
     if (r.status === 401) throw new Error('This page has no valid token: open the link the web server printed when it started.');
-    const m = (await r.json()) as { ok: boolean; value?: unknown; error?: string }; if (!m.ok) throw new Error(m.error ?? 'failed'); return m.value;
+    const m = (await r.json()) as { ok: boolean; value?: unknown; error?: string }; if (!m.ok) throw new Error(m.error ?? 'failed'); return unpackBinary(m.value, b64);
   };
   const send = (name: string, ...args: unknown[]): void => { void rpc(name, ...args).catch(() => { /* fire and forget, as ipcRenderer.send */ }); };
 

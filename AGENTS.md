@@ -98,7 +98,8 @@ session is working: do not restart.
   working on a part of the window, run that part's window check by name (`sh tests/run.sh <name>`).
 - **Stand-ins:** `tests/mock/claude` and `tests/mock/codex` answer like Claude Code and `codex app-server` with canned
   replies and no account (`CVC_CLAUDE_BIN`, `CVC_CODEX_BIN` point the app at them). When `chat.ts` or `codex.ts` starts
-  reading a new message or method, teach the stand-in too.
+  reading a new message or method, teach the stand-in too. `tests/mock/whisper-server` and `tests/mock/say` stand in for the
+  voice's ears and mouth (put `tests/mock` first on the PATH; the web check does).
 - One-off experiments stay in `tmp/` (git-ignored). Speech into the app: `--use-file-for-fake-audio-capture=<file>.wav%noloop`
   with a 48 kHz mono WAV made by `say -o` (pad silence with Python's `wave`; every new capture replays the file).
 

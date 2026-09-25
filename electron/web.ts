@@ -2,7 +2,9 @@
 // the Electron main process does (electron/main.ts), without Electron: it serves the built window (dist/) and answers the window's calls
 // by the same channel names as the IPC (`POST /rpc`), and it sends what the main process would send to the window as server-sent
 // events (`GET /events`). The window gets its `window.desktop` from web/src/webDesktop.ts instead of the preload.
-// Text only for now: the voice needs macOS (`say`) and whisper-server; its calls answer that it is not here.
+// The voice works as on the desktop: the browser's microphone, whisper-server on this machine (on Windows `npm run voice:setup` fetches
+// it and the models), and the lines spoken by the machine's own speech (`say` on a Mac, System.Speech on Windows), sent to the
+// browser as WAV. What only the desktop has: the floating voice bar, and muting the window while nobody listens.
 // Safety: it listens on 127.0.0.1 only, every call needs the token printed at start (it is in the URL it prints and opens), and a
 // request whose Host is not this machine's is refused (a web page elsewhere cannot reach it through DNS tricks). One copy per data
 // folder, like the desktop app: a lock file with the running server's pid, and no start while the desktop app holds that folder.
@@ -16,7 +18,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync,
 import { readFile } from 'node:fs/promises';
 import { DATA_DIR } from './paths.js';
 import type { Attachment, ChatEvent, ChatStart, DebugEvent, PermissionDecision, Provider } from '../shared/types.js';
-import { localHost, rpcArgs } from '../shared/web.js';
+import { localHost, packBinary, rpcArgs, unpackBinary, type B64 } from '../shared/web.js';
+const b64: B64 = { to: (u) => Buffer.from(u).toString('base64'), from: (t) => new Uint8Array(Buffer.from(t, 'base64')) };
 
 const here = path.dirname(fileURLToPath(import.meta.url)); // dist-electron/
 const ROOT = process.env.CVC_ROOT || path.resolve(here, '..');
@@ -62,7 +65,7 @@ voice.setDetailsSink((d) => emit('command:details', d));
 const agentWaits = new Map<string, (text: string) => void>();
 chat.setAgentRequest((chatId, req) => new Promise((resolve) => { const id = randomUUID(); const t = setTimeout(() => { agentWaits.delete(id); resolve('The app did not answer in time.'); }, 30_000); agentWaits.set(id, (text) => { clearTimeout(t); resolve(text); }); const l = chat.liveInfo(chatId); emit('agent:request', { id, chatId, projectId: l?.projectId ?? '', sessionId: l?.sessionId ?? null, req }); }));
 
-const NO_VOICE = 'Voice is not available in the web version yet: it needs the desktop app on a Mac. Type instead.';
+const ears = new Set<string>(); // who is listening (each chat by its key, the welcome), for the flight recorder, as in main.ts
 const home = (p: string) => (p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
 async function fileView(p: string): Promise<unknown> { // what the right pane shows (the same answers as electron/main.ts)
   const file = home(p); const name = path.basename(file);
@@ -111,14 +114,20 @@ const handlers: Record<string, (...a: never[]) => unknown> = {
   'voice:status': () => voice.status(),
   'voice:model-in-use': (p: Provider, preferred: string) => voice.voiceModelInUse(p, preferred),
   'setup:check': () => voice.setupCheck(),
-  'voice:on': (on: boolean) => { if (on) throw new Error(NO_VOICE); return voice.status(); },
-  'voice:stt': () => false,
-  'voice:wake': () => ({ woke: false, heard: '' }),
-  'voice:transcribe': () => { throw new Error(NO_VOICE); },
-  'voice:ack': () => '', 'voice:understand': () => '', 'voice:summarize': () => '',
+  'voice:on': (on: boolean, who: string, p?: Provider, ackModel?: string, stt?: { model: string; vocabulary: string }) => { // the browser asked for the microphone itself
+    const key = who || 'voice'; if (on) ears.add(key); else ears.delete(key);
+    debug.log('note', `voice ${on ? 'on' : 'off'} for ${key}${p ? ` (${p})` : ''}; listening now: ${[...ears].join(', ') || 'nobody'}`, { by: 'app' });
+    if (on) { if (stt) voice.configureStt(stt.model, stt.vocabulary); void voice.ensureWhisper(); if (p && ackModel !== undefined) voice.warmAck(p, ackModel); } else if (!ears.size) voice.cancelSpeech();
+    return voice.status(); },
+  'voice:stt': (model: string, vocabulary: string) => { voice.configureStt(model, vocabulary); void voice.ensureWhisper(); return true; },
+  'voice:wake': (wav: ArrayBuffer, phrase: string, language: string) => voice.wakeCheck(wav, phrase, language),
+  'voice:transcribe': (wav: ArrayBuffer, language: string, quiet?: boolean, hint?: string, retry?: boolean) => voice.transcribe(wav, language, quiet, hint, retry),
+  'voice:ack': (text: string) => voice.acknowledge(text),
+  'voice:understand': (text: string, p: Provider, model: string, main: string, recent?: string, said?: string) => voice.understand(text, p, model, main, recent, said),
+  'voice:summarize': (asked: string, answer: string, p: Provider, model: string, main: string) => voice.summarize(asked, answer, p, model, main),
   'voice:triage': (text: string, p: Provider, model: string, main: string, task?: string) => voice.triage(text, p, model, main, task),
-  'voice:speak': () => null,
-  'voice:cancel': () => true,
+  'voice:speak': (text: string, v: string, rate: number) => voice.speak(text, v, rate),
+  'voice:cancel': () => { voice.cancelSpeech(); return true; },
   // desktop-only: the floating voice bar and the window's audio
   'audio:welcome': () => undefined, 'mini:drag': () => undefined, 'mini:size': () => undefined, 'voice:state': () => undefined,
   'voice:type': (text: string) => emit('voice:type', String(text)),
@@ -155,7 +164,7 @@ const server = http.createServer((req, res) => {
     let body = ''; req.on('data', (d: Buffer) => { body += d.toString(); if (body.length > 80e6) req.destroy(); });
     req.on('end', () => { void (async () => {
       let name = ''; try { const m = JSON.parse(body) as { name: string; args?: unknown[]; undef?: number[] }; name = m.name; const fn = handlers[name]; if (!fn) throw new Error(`unknown channel: ${name}`);
-        const value = await (fn as (...a: unknown[]) => unknown)(...rpcArgs(m.args, m.undef)); res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, value: value ?? null }));
+        const value = await (fn as (...a: unknown[]) => unknown)(...rpcArgs(m.args, m.undef).map((a) => unpackBinary(a, b64))); res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, value: packBinary(value, b64) ?? null }));
       } catch (e) { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: (e as Error).message || String(e) })); }
     })(); });
     return;

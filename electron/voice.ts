@@ -33,8 +33,13 @@ let whisper: ChildProcess | null = null;
 let whisperState: VoiceStatus['whisper'] = 'starting';
 let whisperDetail = '';
 
+const WIN = process.platform === 'win32';
+/** A command on the PATH, or where the app's own setup puts it: Homebrew's folders on a Mac; on Windows `<app>/whisper`, where
+ * `npm run voice:setup` unpacks whisper.cpp (its release zip keeps the programs in Release/), and the name ends in .exe. */
 function findOnPath(bin: string): string | null {
-  for (const dir of (process.env.PATH ?? '').split(':').concat(['/opt/homebrew/bin', '/usr/local/bin'])) { const p = path.join(dir, bin); if (dir && existsSync(p)) return p; }
+  const name = WIN ? `${bin}.exe` : bin;
+  const extra = WIN ? [path.join(ROOT, 'whisper', 'Release'), path.join(ROOT, 'whisper')] : ['/opt/homebrew/bin', '/usr/local/bin'];
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter).concat(extra)) { const p = path.join(dir, name); if (dir && existsSync(p)) return p; }
   return null;
 }
 // What the user picked in the voice settings. The vocabulary is Whisper's "initial prompt": names it would otherwise
@@ -116,7 +121,7 @@ async function startWhisper(): Promise<void> {
   if (whisper && whisperState === 'starting') { await waitForServer(60_000, whisper); return; }
   if (whisper) { const hung = whisper; whisper = null; hung.removeAllListeners('exit'); hung.kill('SIGKILL'); } // one that never came up
   const bin = findOnPath('whisper-server');
-  if (!bin) { whisperState = 'missing-binary'; whisperDetail = 'whisper-server not found. Install with: brew install whisper-cpp'; return; }
+  if (!bin) { whisperState = 'missing-binary'; whisperDetail = `whisper-server not found. Install with: ${WIN ? 'npm run voice:setup' : 'brew install whisper-cpp'}`; return; }
   const model = findModel();
   if (!model) { whisperState = 'missing-model'; whisperDetail = `No Whisper model in ${path.join(ROOT, 'models')}. See README for the one-line download.`; return; }
   whisperState = 'starting'; whisperDetail = path.basename(model); running = { ...want };
@@ -236,14 +241,29 @@ const renders = new Set<ChildProcess>();
 let cachedVoices: string[] | null = null;
 export async function voices(): Promise<string[]> {
   if (cachedVoices) return cachedVoices;
+  if (WIN) { // the voices of Windows' own speech (System.Speech), as "Name|en_US" like say's list
+    const out = await new Promise<string>((resolve) => execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo.Name + '|' + $_.VoiceInfo.Culture.Name }"], { windowsHide: true }, (_e, stdout) => resolve(stdout ?? '')));
+    return (cachedVoices = out.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.includes('|')).map((l) => l.replace(/-/g, '_')));
+  }
   const out = await new Promise<string>((resolve) => execFile('say', ['-v', '?'], (_e, stdout) => resolve(stdout ?? '')));
   cachedVoices = out.split('\n').map((l) => /^(.+?)\s{2,}([a-z]{2}_[A-Z]{2})/.exec(l)).filter((m): m is RegExpExecArray => m !== null).map((m) => `${m[1]!.trim()}|${m[2]}`);
   return cachedVoices;
 }
-/** Render one chunk of text to 22.05 kHz mono WAV with `say`. Killed immediately by cancelSpeech(). */
+/** say's words per minute (185 is its usual pace) as System.Speech's rate, -10 to 10 (0 is its usual pace). Pure. */
+export const sapiRate = (wpm: number): number => Math.max(-10, Math.min(10, Math.round((wpm - 185) / 18)));
+/** Windows: the same WAV through Windows' own speech (System.Speech, the voice picked in Windows' settings unless one is named). The
+ * text goes on stdin (never through a command line), the file path is ours, the voice comes through the environment. */
+function speakWindows(clean: string, file: string, voice: string, rate: number): Promise<number | null> {
+  const script = `[Console]::InputEncoding = [Text.Encoding]::UTF8; Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = ${sapiRate(rate)}; if ($env:JAUVEX_VOICE) { try { $s.SelectVoice($env:JAUVEX_VOICE) } catch {} }; $f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono); $s.SetOutputToWaveFile('${file}', $f); $s.Speak([Console]::In.ReadToEnd()); $s.Dispose()`;
+  const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, env: { ...process.env, JAUVEX_VOICE: voice.split('|')[0] ?? '' } });
+  renders.add(child); child.stdin?.on('error', () => {}); child.stdin?.end(clean, 'utf8');
+  return new Promise<number | null>((resolve) => { child.on('exit', (c) => { renders.delete(child); resolve(c); }); child.on('error', () => { renders.delete(child); resolve(1); }); });
+}
+/** Render one chunk of text to 22.05 kHz mono WAV with `say` (Windows: its own speech). Killed immediately by cancelSpeech(). */
 export async function speak(text: string, voice: string, rate: number): Promise<ArrayBuffer | null> {
   const clean = text.trim(); if (!clean) return null;
   const file = path.join(os.tmpdir(), `cvc-say-${randomUUID()}.wav`);
+  if (WIN) { try { if ((await speakWindows(clean, file, voice, rate)) !== 0) return null; const buf = await fs.readFile(file); return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer; } catch { return null; } finally { void fs.rm(file, { force: true }); } }
   const args = ['-o', file, '--file-format=WAVE', '--data-format=LEI16@22050', '-r', String(Math.round(rate))];
   const render = async (v: string): Promise<number | null> => { const child = spawn('say', [...args, ...(v ? ['-v', v] : []), '--', clean], { stdio: 'ignore' }); renders.add(child); const c = await new Promise<number | null>((resolve) => { child.on('exit', resolve); child.on('error', () => resolve(1)); }); renders.delete(child); return c; };
   // No voice picked means the system's default voice (slower to render than the classic voices, but it is the one that sounds right).
@@ -626,7 +646,7 @@ export async function summarize(asked: string, answer: string, provider: Provide
 }
 
 /** What the first-run screen needs to know, without starting a server: is `say` there, whisper-server, a model, a TypeSafe key. */
-export async function setupCheck(): Promise<SetupCheck> { if (process.env.CVC_SETUP_FAKE === 'missing') return { say: true, voice: 'basic', whisperBinary: false, models: [], jevKey: false }; /* window checks: the failing screen */ const say = !!findOnPath('say') || existsSync('/usr/bin/say'); return { say, voice: say ? await voiceQuality() : 'unknown', whisperBinary: !!findOnPath('whisper-server'), models: listModels(), jevKey: await jev.hasKey() }; }
+export async function setupCheck(): Promise<SetupCheck> { if (process.env.CVC_SETUP_FAKE === 'missing') return { say: true, voice: 'basic', whisperBinary: false, models: [], jevKey: false }; /* window checks: the failing screen */ const say = WIN || !!findOnPath('say') || existsSync('/usr/bin/say'); return { say, voice: WIN ? 'system' : say ? await voiceQuality() : 'unknown', whisperBinary: !!findOnPath('whisper-server'), models: listModels(), jevKey: await jev.hasKey(), os: process.platform }; } // Windows: its own speech, always there; its voice is whatever Windows' settings chose
 /** Is the System voice still the basic one? `say` with no voice renders the System voice (Spoken Content); on a fresh Mac that is the
  *  compact Samantha, which sounds robotic. A Siri voice cannot be named by an app (say -v falls back to Samantha), only that setting
  *  reaches it: so the check renders one word both ways and compares the bytes. Same bytes: basic. */

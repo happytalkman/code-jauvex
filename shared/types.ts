@@ -147,7 +147,7 @@ export type ChatEvent =
 
 // ---- voice (all local except the two Claude calls): whisper.cpp for speech in, macOS `say` for speech out
 // The first-run screen's checks: what is on this Mac, without starting anything.
-export type SetupCheck = { say: boolean; voice: 'natural' | 'basic' | 'unknown'; whisperBinary: boolean; models: string[]; jevKey: boolean }; // voice: basic = the System voice is the compact Samantha (a fresh Mac), which sounds robotic; natural = a Siri or other voice was chosen in Spoken Content
+export type SetupCheck = { say: boolean; voice: 'natural' | 'basic' | 'unknown' | 'system'; whisperBinary: boolean; models: string[]; jevKey: boolean; os?: string }; // system: Windows' own speech, its voice chosen in Windows' settings; os: the server's platform (the web version runs on Windows too) // voice: basic = the System voice is the compact Samantha (a fresh Mac), which sounds robotic; natural = a Siri or other voice was chosen in Spoken Content
 export type VoiceStatus = { jev: boolean; jevKey: boolean; whisper: 'missing-binary' | 'missing-model' | 'starting' | 'ready' | 'error'; detail: string; voices: string[]; models: string[]; model: string; voiceModels: { claude: { id: string; label: string; resolved?: string }[]; codex: { id: string; label: string }[]; zcode: { id: string; label: string }[] } }; // resolved: the wire id an alias stands for (sonnet -> claude-sonnet-5), so a saved wire id shows as its alias // voiceModels: what each provider offers the voice, from the live lists
 // What to do with something said while the main thread is busy. queue: hand it over when the turn ends. stop: interrupt the turn.
 // replace: interrupt the turn and send this instead. `say` is the voice's line about it.
