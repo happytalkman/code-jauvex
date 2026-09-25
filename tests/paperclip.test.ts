@@ -38,6 +38,10 @@ const pc = http.createServer((q, s) => { let b = ''; q.on('data', (d) => { b += 
   if (u === '/api/issues/i1' && q.method === 'PATCH') return q.headers.authorization ? send(401, { error: 'Agent run id required' }) : send(200, { id: 'i1', status: (JSON.parse(b) as { status: string }).status });
   send(404, { error: 'not found' }); }); });
 await new Promise<void>((ok) => pc.listen(4493, '127.0.0.1', ok));
+// process.exit() while fetch's socket was closing aborted Node on Windows (a libuv assertion: connect ended with no code 2 and no company,
+// and the setup never retried with --company); the command-line clients that fetch set the exit code instead
+const exitsAfterFetch = (f: string) => readFileSync(f, 'utf8').split('\n').some((l) => /await fetch\(/.test(l) && l.includes('process.exit(')); // a request's own line
+check('the clients that fetch never force their exit after a request', !readFileSync('scripts/paperclip.ts', 'utf8').includes('process.exit(') && !exitsAfterFetch('scripts/graph.ts'));
 rmSync(path.join(DATA, 'paperclip.json'), { force: true }); rmSync(path.join(HOME, 'paperclip'), { recursive: true, force: true });
 const cli = (...args: string[]) => new Promise<{ code: number; out: string; err: string }>((ok) => execFile(process.execPath, ['scripts/paperclip.ts', ...args], { env: { ...process.env, PAPERCLIP_URL: 'http://127.0.0.1:4493', PAPERCLIP_API_KEY: '' } }, (e, out, err) => ok({ code: e ? (e as { code?: number }).code ?? 1 : 0, out, err })));
 const s0 = await cli('status'); check('status before connect: up, not connected', s0.code === 0 && /"up":true/.test(s0.out) && /"connected":false/.test(s0.out), s0.out + s0.err);

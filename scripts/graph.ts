@@ -18,10 +18,11 @@ const args = process.argv.slice(2); const at = args.indexOf('--params'); const p
 if (!q) { console.error('usage: node scripts/graph.ts "<cypher>" [--params \'{"name":"value"}\'] | status | newid'); process.exit(2); }
 if (q === 'newid') { console.log(newId()); process.exit(0); }
 if (q === 'status') {
-  try { const r = await fetch(`${cfg.admin}/readyz`, { signal: AbortSignal.timeout(3000) }); console.log(JSON.stringify({ ok: r.ok, url: cfg.url, ready: r.ok })); process.exit(r.ok ? 0 : 1); }
-  catch { console.log(JSON.stringify({ ok: false, url: cfg.url, ready: false, error: 'WEAIDdb does not answer: is it running? On Windows: powershell -File scripts/weaiddb.ps1 start' })); process.exit(1); }
-}
+  try { const r = await fetch(`${cfg.admin}/readyz`, { signal: AbortSignal.timeout(3000) }); console.log(JSON.stringify({ ok: r.ok, url: cfg.url, ready: r.ok })); process.exitCode = r.ok ? 0 : 1; }
+  catch { console.log(JSON.stringify({ ok: false, url: cfg.url, ready: false, error: 'WEAIDdb does not answer: is it running? On Windows: powershell -File scripts/weaiddb.ps1 start' })); process.exitCode = 1; }
+} else { // the exit codes after a request are set, not forced: process.exit() while the request's socket closes aborted Node on Windows (a libuv assertion)
 let parameters: Record<string, unknown> | undefined; if (params !== undefined) { const j = jsonArg(params); if (!j.ok || !j.value || typeof j.value !== 'object' || Array.isArray(j.value)) { console.error(`--params takes a JSON object${j.ok ? '' : `: ${j.error}`}`); process.exit(2); } parameters = j.value as Record<string, unknown>; } // '-': from stdin
 let token: string; try { token = readFileSync(cfg.tokenFile, 'utf8').trim(); } catch { console.error(`WEAIDdb is not set up here: no token file at ${cfg.tokenFile}.`); process.exit(1); }
-try { const req = graphRequest(cfg, token, q, parameters); const r = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(40_000) }); const a = graphAnswer(r.status, await r.text()); console.log(a.text); process.exit(a.ok ? 0 : 1); }
-catch (e) { console.error(`WEAIDdb does not answer at ${cfg.url} (${(e as Error).message}).`); process.exit(1); }
+try { const req = graphRequest(cfg, token, q, parameters); const r = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(40_000) }); const a = graphAnswer(r.status, await r.text()); console.log(a.text); process.exitCode = a.ok ? 0 : 1; }
+catch (e) { console.error(`WEAIDdb does not answer at ${cfg.url} (${(e as Error).message}).`); process.exitCode = 1; }
+}

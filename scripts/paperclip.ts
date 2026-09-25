@@ -21,40 +21,49 @@ async function call(method: string, p: string, body?: unknown, apiKey = key()): 
   const req = paperclipRequest(cfg, method, p, body, apiKey); const r = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(30_000) }); return { status: r.status, text: await r.text() };
 }
 const [cmd, ...rest] = process.argv.slice(2);
-const down = () => { console.error(`Paperclip does not answer at ${cfg.url}. Start it: npx paperclipai onboard --yes (Windows: the setup does it).`); process.exit(1); };
+// Every way out goes through quit(): the exit code is set and Node ends once its sockets have closed. quit() while fetch's socket
+// was still closing aborted Node on Windows ("Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)", the Windows check: connect then
+// ended with neither its code 2 nor a company, and the setup's retry with --company never ran).
+class Quit { code: number; constructor(code: number) { this.code = code; } }
+function quit(code: number): never { throw new Quit(code); }
+const down = () => { console.error(`Paperclip does not answer at ${cfg.url}. Start it: npx paperclipai onboard --yes (Windows: the setup does it).`); quit(1); };
 try {
   if (cmd === 'status') {
-    const h = await call('GET', '/api/health', undefined, '').catch(() => null); if (!h) { console.log(JSON.stringify({ ok: false, url: cfg.url, up: false })); process.exit(1); }
+    const h = await call('GET', '/api/health', undefined, '').catch(() => null); if (!h) { console.log(JSON.stringify({ ok: false, url: cfg.url, up: false })); quit(1); }
     const health = JSON.parse(h.text) as { status?: string; version?: string; deploymentMode?: string };
     console.log(JSON.stringify({ ok: health.status === 'ok', url: cfg.url, up: true, version: health.version, mode: health.deploymentMode, connected: !!(cfg.companyId && key()), companyId: cfg.companyId || null }));
   } else if (cmd === 'connect') {
     await call('GET', '/api/health', undefined, '').catch(down);
     const at = rest.indexOf('--company'); const want = at >= 0 ? (rest[at + 1] ?? '').trim() : '';
-    const list = await call('GET', '/api/companies', undefined, ''); if (list.status !== 200) { console.error(paperclipAnswer(list.status, list.text).text + ' (connect needs Paperclip in trusted local mode, as npx paperclipai onboard --yes sets it up)'); process.exit(1); }
+    const list = await call('GET', '/api/companies', undefined, ''); if (list.status !== 200) { console.error(paperclipAnswer(list.status, list.text).text + ' (connect needs Paperclip in trusted local mode, as npx paperclipai onboard --yes sets it up)'); quit(1); }
     const companies = JSON.parse(list.text) as { id: string; name: string }[];
     let company = want ? companies.find((c) => c.id === want || c.name.toLowerCase() === want.toLowerCase()) : companies.length === 1 ? companies[0] : undefined;
-    if (!company && want && !companies.some((c) => c.id === want)) { const made = await call('POST', '/api/companies', { name: want }, ''); if (made.status >= 300) { console.error(paperclipAnswer(made.status, made.text).text); process.exit(1); } company = JSON.parse(made.text) as { id: string; name: string }; console.error(`Made the company "${company.name}".`); }
-    if (!company) { console.error(companies.length ? `Which company? --company "<name>", one of: ${companies.map((c) => c.name).join(', ')}` : 'No company yet: --company "<a name>" makes one.'); process.exit(2); }
+    if (!company && want && !companies.some((c) => c.id === want)) { const made = await call('POST', '/api/companies', { name: want }, ''); if (made.status >= 300) { console.error(paperclipAnswer(made.status, made.text).text); quit(1); } company = JSON.parse(made.text) as { id: string; name: string }; console.error(`Made the company "${company.name}".`); }
+    if (!company) { console.error(companies.length ? `Which company? --company "<name>", one of: ${companies.map((c) => c.name).join(', ')}` : 'No company yet: --company "<a name>" makes one.'); quit(2); }
     const agents = JSON.parse((await call('GET', `/api/companies/${company.id}/agents`, undefined, '')).text) as { id: string; name: string }[];
     let agent = Array.isArray(agents) ? agents.find((a) => a.name === 'Jauvex') : undefined;
-    if (!agent) { const made = await call('POST', `/api/companies/${company.id}/agents`, { name: 'Jauvex', role: 'engineer', capabilities: 'The coding agents of the Jauvex app (Claude, Codex, ZCode, Claw), working in the user\'s folders.' }, ''); if (made.status >= 300) { console.error(paperclipAnswer(made.status, made.text).text); process.exit(1); } agent = JSON.parse(made.text) as { id: string; name: string }; }
+    if (!agent) { const made = await call('POST', `/api/companies/${company.id}/agents`, { name: 'Jauvex', role: 'engineer', capabilities: 'The coding agents of the Jauvex app (Claude, Codex, ZCode, Claw), working in the user\'s folders.' }, ''); if (made.status >= 300) { console.error(paperclipAnswer(made.status, made.text).text); quit(1); } agent = JSON.parse(made.text) as { id: string; name: string }; }
     // Paused: Paperclip then never runs it itself (it has no command to run: a task assigned to it once ended in a failed run,
     // "Process adapter missing command"); its key still reads and opens issues, and this app's agents do the work.
     await call('POST', `/api/agents/${agent.id}/pause`, undefined, '');
-    const k = await call('POST', `/api/agents/${agent.id}/keys`, { name: 'jauvex' }, ''); if (k.status >= 300) { console.error(paperclipAnswer(k.status, k.text).text); process.exit(1); }
-    const token = (JSON.parse(k.text) as { token?: string }).token; if (!token) { console.error('Paperclip gave no key.'); process.exit(1); }
+    const k = await call('POST', `/api/agents/${agent.id}/keys`, { name: 'jauvex' }, ''); if (k.status >= 300) { console.error(paperclipAnswer(k.status, k.text).text); quit(1); }
+    const token = (JSON.parse(k.text) as { token?: string }).token; if (!token) { console.error('Paperclip gave no key.'); quit(1); }
     mkdirSync(path.dirname(keyFile), { recursive: true }); writeFileSync(keyFile, token, { mode: 0o600 }); try { chmodSync(keyFile, 0o600); } catch { /* Windows: the user's own profile folder */ }
     mkdirSync(data, { recursive: true }); writeFileSync(cfgFile, JSON.stringify({ url: cfg.url, companyId: company.id, agentId: agent.id }, null, 2));
     console.log(JSON.stringify({ ok: true, company: company.name, companyId: company.id, agent: agent.name, agentId: agent.id }));
   } else if (cmd && /^(GET|POST|PATCH|PUT|DELETE)$/i.test(cmd) && rest[0]) {
-    try { paperclipRequest(cfg, cmd, rest[0]); } catch (e) { console.error((e as Error).message); process.exit(2); } // refused before anything is sent, and said as such
-    let body: unknown; if (rest[1] !== undefined) { const j = jsonArg(rest[1]); if (!j.ok) { console.error(`the body is a JSON value: ${j.error}`); process.exit(2); } body = j.value; } // '-': from stdin
+    try { paperclipRequest(cfg, cmd, rest[0]); } catch (e) { console.error((e as Error).message); quit(2); } // refused before anything is sent, and said as such
+    let body: unknown; if (rest[1] !== undefined) { const j = jsonArg(rest[1]); if (!j.ok) { console.error(`the body is a JSON value: ${j.error}`); quit(2); } body = j.value; } // '-': from stdin
     const target = rest[0].replaceAll('{companyId}', cfg.companyId);
     let r = await call(cmd, target, body).catch(down); let note = '';
     if (needsRun(r.status, r.text)) { // a comment or an update outside a Paperclip run: again as the board, in trusted local mode only
       const mode = JSON.parse((await call('GET', '/api/health', undefined, '')).text) as { deploymentMode?: string };
       if (mode.deploymentMode === 'local_trusted') { r = await call(cmd, target, asBoard(body), ''); note = '(Paperclip takes an agent\'s comments and updates only inside its own run: this one went as the board, marked [from Jauvex].)'; }
     }
-    const a = paperclipAnswer(r.status, r.text); console.log(a.text); if (note) console.error(note); process.exit(a.ok ? 0 : 1);
-  } else { console.error('usage: node scripts/paperclip.ts status | connect [--company "<name>"] | <GET|POST|PATCH|DELETE> /api/... [json]'); process.exit(2); }
-} catch (e) { if ((e as Error).message?.includes('only paths under /api') || (e as Error).message?.includes('not an HTTP method')) { console.error((e as Error).message); process.exit(2); } down(); }
+    const a = paperclipAnswer(r.status, r.text); console.log(a.text); if (note) console.error(note); quit(a.ok ? 0 : 1);
+  } else { console.error('usage: node scripts/paperclip.ts status | connect [--company "<name>"] | <GET|POST|PATCH|DELETE> /api/... [json]'); quit(2); }
+} catch (e) {
+  if (e instanceof Quit) process.exitCode = e.code;
+  else if ((e as Error).message?.includes('only paths under /api') || (e as Error).message?.includes('not an HTTP method')) { console.error((e as Error).message); process.exitCode = 2; }
+  else { try { down(); } catch (q) { process.exitCode = (q as Quit).code; } }
+}
