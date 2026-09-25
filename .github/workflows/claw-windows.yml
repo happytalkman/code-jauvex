@@ -36,12 +36,14 @@ jobs:
         shell: powershell
         working-directory: claw/rust
         run: |
+          $ErrorActionPreference = 'Continue'  # GitHub's powershell shell starts with Stop
           # no ErrorActionPreference Stop: Windows PowerShell turns a native command's stderr into an error; the checks below decide
           $mock = Start-Process .\target\release\mock-anthropic-service.exe -ArgumentList '--bind', '127.0.0.1:4410' -PassThru -NoNewWindow -RedirectStandardOutput mock.log
           $up = $false; for ($i = 0; $i -lt 30 -and -not $up; $i++) { Start-Sleep -Milliseconds 500; try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 4410); $c.Close(); $up = $true } catch { } }
           Write-Host "mock service: listening=$up exited=$($mock.HasExited) $(if ($mock.HasExited) { "code=$($mock.ExitCode)" })"; Get-Content mock.log -ErrorAction SilentlyContinue
           if (-not $up) { throw 'the mock Anthropic service did not start on Windows' }
           $env:ANTHROPIC_API_KEY = 'mock-key'; $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:4410'
+          $env:NO_PROXY = '127.0.0.1,localhost'; $env:no_proxy = $env:NO_PROXY  # on Windows claw's HTTP client also takes the system's proxy settings
           $dir = Join-Path $env:RUNNER_TEMP 'clawproj'; New-Item -ItemType Directory -Force $dir | Out-Null; Push-Location $dir
           $out = 'PARITY_SCENARIO:streaming_text hello from Windows' | & "$env:GITHUB_WORKSPACE\claw\rust\target\release\claw.exe" --output-format json --permission-mode workspace-write
           Pop-Location; taskkill /PID $mock.Id /T /F | Out-Null
@@ -53,6 +55,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ErrorActionPreference = 'Continue'  # GitHub's powershell shell starts with Stop, and gh says "release not found" on stderr
           $short = $env:CLAW_COMMIT.Substring(0, 7); $tag = "claw-$short"; $d = Join-Path $env:RUNNER_TEMP 'rel'; New-Item -ItemType Directory -Force $d | Out-Null
           Copy-Item claw\rust\target\release\claw.exe (Join-Path $d 'claw.exe'); Copy-Item claw\LICENSE (Join-Path $d 'claw-LICENSE.txt')
           $sum = (Get-FileHash (Join-Path $d 'claw.exe') -Algorithm SHA256).Hash.ToLower(); $size = (Get-Item (Join-Path $d 'claw.exe')).Length
