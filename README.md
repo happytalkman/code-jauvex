@@ -47,7 +47,12 @@ irm https://raw.githubusercontent.com/happytalkman/code-jauvex/claude/awesome-pa
 It installs what is missing (Node and Git with winget), gets the app into `<home>\jauvex`, installs it, sets up the voice, and builds
 ZCode's CLI from its source into `<home>\zcode` (Node 24 and pnpm, through npx: `corepack enable` needs an administrator on Windows),
 with a `zcode` command in `<home>\.jauvex\bin` added to the user's PATH; ZCode is rebuilt only when its source moved, and
-`JAUVEX_ZCODE=0` leaves it out. What stays the user's: signing in (`zcode login zai`, `claude auth login`, `codex login`).
+`JAUVEX_ZCODE=0` leaves it out. Claw comes as `claw.exe` in the same folder: claw-code publishes no release and building it needs Rust and
+Microsoft's C++ build tools, so `.github/workflows/claw-windows.yml` builds it from the pinned claw-code commit on a Windows runner and
+publishes it, with claw's MIT license, as this repository's release `claw-08106b0`; the setup downloads it and checks its size and
+SHA-256 (a published file is never replaced: a rebuild is not byte for byte the same). `JAUVEX_CLAW=0` leaves it out. Not verified
+yet: a whole claw turn on Windows (on that runner claw could not reach claw's own mock service, for a reason not found yet); on Linux
+the same claw commit runs whole turns in the app (`tests/claw-provider.test.ts`). What stays the user's: signing in (`zcode login zai`, `claude auth login`, `codex login`) and Claw's key (`setx ANTHROPIC_API_KEY sk-ant-...`).
 `.github/workflows/windows.yml` runs that command on a clean Windows runner on every change to it: the install, then the app driven over
 its API (the page, the Jauvex agent, ZCode found and asking for a sign-in, Windows' speech, whisper-server hearing it).
 

@@ -63,6 +63,7 @@ jobs:
           Write-Host "claw.exe: $size bytes, sha256 $sum"
           $notes = "claw.exe for Windows x64, built from github.com/ultraworkers/claw-code at $env:CLAW_COMMIT (MIT; its license is claw-LICENSE.txt) by .github/workflows/claw-windows.yml. SHA-256: $sum. Used by scripts/windows-start.ps1."
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null; $exists = $LASTEXITCODE -eq 0  # stderr for a missing release: not an error here
-          if ($exists) { gh release upload $tag (Join-Path $d 'claw.exe') (Join-Path $d 'claw.exe.sha256') (Join-Path $d 'claw-LICENSE.txt') --clobber --repo $env:GITHUB_REPOSITORY }
+          # a published claw.exe is never replaced: the setup pins its SHA-256, and a rebuild is not byte for byte the same
+          if ($exists) { Write-Host "$tag is already published: kept as it is (this build: $sum)"; exit 0 }
           else { gh release create $tag (Join-Path $d 'claw.exe') (Join-Path $d 'claw.exe.sha256') (Join-Path $d 'claw-LICENSE.txt') --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "claw for Windows ($short)" --notes $notes }
           if ($LASTEXITCODE) { throw 'publishing the release failed' }

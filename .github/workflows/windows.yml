@@ -62,9 +62,8 @@ jobs:
             Check '... its server answers, and it asks for a sign-in' ($zs.error -match 'no model to run on') "$($zs.error)"
             # Claw, fetched by the install: the app finds claw.exe; no API key here, so it says how to set one
             $cs = (Rpc 'account:status' @('claw')).value; Write-Host "claw: $($cs | ConvertTo-Json -Compress)"
-            if (Select-String -Path scripts\windows-start.ps1 -Pattern "clawSum = ''" -Quiet) { Write-Host 'claw.exe is not pinned in the setup yet: its checks wait' } else {
             Check 'Claw: the app finds claw.exe' ($cs.method -match '^claw ') "$($cs.method) $($cs.error)"
-            Check '... and asks for an API key' ((-not $cs.signedIn) -and $cs.error -match 'ANTHROPIC_API_KEY') "$($cs.error)" }
+            Check '... and asks for an API key' ((-not $cs.signedIn) -and $cs.error -match 'ANTHROPIC_API_KEY') "$($cs.error)"
             $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
             Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''
             Check 'setup: whisper-server is found' ($sc.whisperBinary) ''

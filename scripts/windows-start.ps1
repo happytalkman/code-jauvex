@@ -78,7 +78,7 @@ if ($withZcode) {
 # Anthropic API key (ANTHROPIC_API_KEY), which stays the user's to set.
 if ($env:JAUVEX_CLAW -ne '0') {
   $clawExe = Join-Path $bin 'claw.exe'; $clawUrl = 'https://github.com/happytalkman/code-jauvex/releases/download/claw-08106b0/claw.exe'
-  $clawSize = 0; $clawSum = '' # pinned once the release is built
+  $clawSize = 15736832; $clawSum = '282015d5da92ca1c4f3cdb956c7e44fcc8da1cbb0837d11f78c0e568713c35a0'
   function Claw-Ok { (Test-Path $clawExe) -and (Get-Item $clawExe).Length -eq $clawSize -and (Get-FileHash $clawExe -Algorithm SHA256).Hash.ToLower() -eq $clawSum }
   if (-not $clawSum) { Write-Host 'Claw for Windows is not published yet: the app runs without it meanwhile.' -ForegroundColor Yellow }
   elseif (Claw-Ok) { Say 'Claw is here' }
