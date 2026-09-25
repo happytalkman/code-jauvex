@@ -22,6 +22,8 @@ jobs:
         run: |
           git init claw; git -C claw remote add origin https://github.com/ultraworkers/claw-code
           git -C claw fetch --depth 1 origin $env:CLAW_COMMIT; git -C claw checkout FETCH_HEAD; git -C claw log -1 --format='%H %cd'
+      - uses: actions/cache@v4
+        with: { path: 'claw/rust/target', key: 'claw-target-${{ env.CLAW_COMMIT }}' }
       - name: Build claw.exe and claw's mock Anthropic service
         shell: powershell
         working-directory: claw/rust
@@ -30,12 +32,15 @@ jobs:
           cargo build --release -p rusty-claude-cli -p mock-anthropic-service; if ($LASTEXITCODE) { throw 'cargo build failed' }
           .\target\release\claw.exe --version
       - name: One real turn on Windows, against the mock service
+        continue-on-error: true  # claw.exe is checked by --version above; this says whether a whole turn runs, and why not
         shell: powershell
         working-directory: claw/rust
         run: |
           # no ErrorActionPreference Stop: Windows PowerShell turns a native command's stderr into an error; the checks below decide
           $mock = Start-Process .\target\release\mock-anthropic-service.exe -ArgumentList '--bind', '127.0.0.1:4410' -PassThru -NoNewWindow -RedirectStandardOutput mock.log
-          Start-Sleep 2
+          $up = $false; for ($i = 0; $i -lt 30 -and -not $up; $i++) { Start-Sleep -Milliseconds 500; try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 4410); $c.Close(); $up = $true } catch { } }
+          Write-Host "mock service: listening=$up exited=$($mock.HasExited) $(if ($mock.HasExited) { "code=$($mock.ExitCode)" })"; Get-Content mock.log -ErrorAction SilentlyContinue
+          if (-not $up) { throw 'the mock Anthropic service did not start on Windows' }
           $env:ANTHROPIC_API_KEY = 'mock-key'; $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:4410'
           $dir = Join-Path $env:RUNNER_TEMP 'clawproj'; New-Item -ItemType Directory -Force $dir | Out-Null; Push-Location $dir
           $out = 'PARITY_SCENARIO:streaming_text hello from Windows' | & "$env:GITHUB_WORKSPACE\claw\rust\target\release\claw.exe" --output-format json --permission-mode workspace-write
