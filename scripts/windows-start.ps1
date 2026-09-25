@@ -130,15 +130,25 @@ if ($withPaperclip) {
       $first = -not (Test-Path (Join-Path $HOME '.paperclip\instances\default\config.json'))
       Say "Starting Paperclip$(if ($first) { ' (the first time: its setup and database, a minute or two)' })"
       $log = Join-Path $HOME '.jauvex\paperclip.log'; New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
-      $pcArgs = if ($first) { @('-y', 'paperclipai@latest', 'onboard', '--yes', '--no-install-service') } else { @('-y', 'paperclipai@latest', 'run') }
       # with the Node this setup checked: a bare npx.cmd can be an older install's, which always runs the node beside it (the Windows
       # check: Paperclip refused to start on Node 22.23 from C:\Program Files\nodejs while Node 24 came first on the PATH)
       if (-not (Node-Ok)) { throw "Paperclip needs Node.js $nodeMin or newer; node is $(node -v)" }
-      $nodeExe = (Get-Command node).Source; $npxCli = Join-Path (Split-Path $nodeExe) 'node_modules\npm\bin\npx-cli.js'
+      $nodeExe = (Get-Command node).Source; $npmCli = Join-Path (Split-Path $nodeExe) 'node_modules\npm\bin\npm-cli.js'
+      # installed once, here, where it can be seen: about 1.5 GB (its own database among it). Through npx in the background it was still
+      # installing after 12 minutes on the Windows check, silent, and the setup gave up on it. Pinned: the version this app was run against.
+      $pcVersion = '2026.916.1'; $pcHome = Join-Path $HOME '.jauvex\paperclip-cli'; $pcPkg = Join-Path $pcHome 'node_modules\paperclipai\package.json'
+      if (-not ((Test-Path $pcPkg) -and ((Get-Content $pcPkg -Raw | ConvertFrom-Json).version -eq $pcVersion))) {
+        Say "Installing Paperclip $pcVersion (about 1.5 GB, once; several minutes)"
+        New-Item -ItemType Directory -Force $pcHome | Out-Null
+        & $nodeExe $npmCli install --prefix $pcHome --no-audit --no-fund --loglevel error "paperclipai@$pcVersion"
+        if (-not (Test-Path $pcPkg)) { throw "npm could not install paperclipai@$pcVersion" }
+      }
+      $pcMain = Join-Path $pcHome 'node_modules\paperclipai\dist\index.js'
+      $pcArgs = if ($first) { @('onboard', '--yes', '--no-install-service') } else { @('run') }
       # stdin from an empty file: a prompt then ends at once instead of waiting on a hidden window nobody sees
       $empty = Join-Path $HOME '.jauvex\empty.txt'; Set-Content -Path $empty -Value $null
-      $pc = Start-Process -FilePath $nodeExe -ArgumentList (@("`"$npxCli`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardInput $empty -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru
-      $clock = [Diagnostics.Stopwatch]::StartNew() # the first time: npm fetches it and its database is made
+      $pc = Start-Process -FilePath $nodeExe -ArgumentList (@("`"$pcMain`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardInput $empty -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru
+      $clock = [Diagnostics.Stopwatch]::StartNew() # the first time: its database is made
       while ($clock.Elapsed.TotalMinutes -lt 6 -and -not $pc.HasExited -and -not (& $up)) { Start-Sleep 2 }
     }
     if (& $up) {
@@ -148,7 +158,7 @@ if ($withPaperclip) {
     } else {
       Write-Host "Paperclip did not come up$(if ($pc -and $pc.HasExited) { " (it ended, code $($pc.ExitCode))" } else { ' in 6 minutes' }); the end of its log ($HOME\.jauvex\paperclip.log):" -ForegroundColor Yellow
       Get-Content "$HOME\.jauvex\paperclip.log", "$HOME\.jauvex\paperclip.log.err" -Tail 25 -ErrorAction SilentlyContinue
-      # what it is doing: its processes (npm still installing, or the server and its database) and Paperclip's own logs
+      # what it is doing: its processes (the server and its database) and Paperclip's own logs
       if ($pc -and -not $pc.HasExited) { Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|cmd|postgres|initdb|pg_ctl)\.exe$' } | ForEach-Object { Write-Host "  $($_.ProcessId) <- $($_.ParentProcessId): $("$($_.CommandLine)".Substring(0, [Math]::Min(200, "$($_.CommandLine)".Length)))" } }
       Get-ChildItem (Join-Path $HOME '.paperclip\instances\default\logs') -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.FullName)"; Get-Content $_.FullName -Tail 15 }
     }

@@ -155,7 +155,9 @@ briefing says so (one narrow goal per run; check the last page it reports, since
 
 [Paperclip](https://github.com/paperclipai/paperclip) (MIT) runs teams of AI agents like a company: goals, projects, issues, comments,
 approvals and budgets, on a dashboard. It runs on its own (`npx paperclipai onboard --yes`: trusted local mode on
-`http://127.0.0.1:3100`, its own embedded Postgres, Node 24.11 or newer), and nothing of it is copied here. The sidebar's Paperclip item
+`http://127.0.0.1:3100`, its own embedded Postgres, Node 24.11 or newer), and nothing of it is copied here. On Windows the setup installs
+it once into `<home>/.jauvex/paperclip-cli` (pinned, about 1.5 GB, in the foreground: through npx in the background it was still
+installing, silent, after 12 minutes) and starts it from there with the Node it checked. The sidebar's Paperclip item
 opens its dashboard in the right pane (or says how to start it), and this app's agents work with it:
 
 - `node scripts/paperclip.ts connect [--company "<name>"]`, once: this app joins that company (the only one, or the one named, made if

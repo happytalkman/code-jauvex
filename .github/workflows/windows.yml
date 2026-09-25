@@ -13,7 +13,7 @@ jobs:
       matrix:
         node: ['as-it-comes', '22', '24']  # 22: the install moves it to 24 for ZCode
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       JAUVEX_BRANCH: ${{ github.ref_name }}
       JAUVEX_NO_START: '1'
