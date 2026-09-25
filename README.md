@@ -517,20 +517,23 @@ Press the white round button in the message box. All local except the two Claude
   ZCode's own desktop app runs its agent with ([github.com/zai-org/ZCode](https://github.com/zai-org/ZCode), read at v3.14.3), one JSON
   object per line over stdio. `session/list` for the folder, `session/create` / `session/resume`, `session/subscribe` (the turn's events
   only reach a subscribed client), `session/send`, `session/stop`, `session/compact`, `session/messages`, `session/read` (how full the
-  context is, read when a turn ends, for the meter), and the host's `interaction/requestPermission`, shown as the usual permission card. Same config, providers and session store as the ZCode CLI
+  context is, read when a turn ends, for the meter), and the host's `interaction/requestPermission`, shown as the usual permission card.
+  Images go with the message the way ZCode's desktop sends them (`attachments`: kind, filename, mimeType, dataBase64) and come back
+  as images in the transcript. A rename is ZCode's own (v4 `renameSession`, a custom title its title generation then leaves alone), so
+  the ZCode app and CLI show the same name; the session is loaded first, since ZCode renames only a session it has open. Same config, providers and session store as the ZCode CLI
   (`~/.zcode`), nothing there parsed by hand; the binary is the `zcode` on the PATH (`CVC_ZCODE_BIN` points elsewhere, the checks at
   `tests/mock/zcode`). Its limits, as that protocol has them: no system prompt per session, so the app's briefing goes in front of a new
   session's first message, marked, and is cut off again when the transcript is shown; `session/send` is refused during a turn, so what is
   said or sent to a working ZCode agent goes as ZCode's v4 `sendText` command asking to be folded into the running turn (`guide`); ZCode
   may queue it as a turn of its own after this one instead, and the chat then stays open until that turn is over too (text only: with
-  images, or when ZCode does not accept the command, it waits in the window's queue); the permission choice maps to ZCode's modes (ask: `build`; auto: `edit`,
+  images, or when ZCode does not accept the command, it waits in the window's queue and goes, images and all, when the turn ends); the permission choice maps to ZCode's modes (ask: `build`; auto: `edit`,
   which edits on its own and still asks before commands; ZCode's own `auto` refuses every tool and is never sent); models are ZCode's
   default, or `provider/model` from its config; ZCode's account models need headers its desktop host supplies, so here it runs on
   providers configured with an API key. The voice of a ZCode session is a ZCode model: `workspace/generateText`, one request with no
   session, nothing kept in ZCode's history, the model picked in the voice settings (`provider/model`) or else the model of the last ZCode
   session here (the protocol lists no models, so the choices are the ones ZCode sessions ran on here). The server runs its requests one at
   a time, so a voice line asked during a turn holds a steer for as long as it takes. ZCode says its `session/*` methods go once its v4
-  protocol is the only one: that update moves this file to `v4/*`. Not there yet: images, renaming, the usage battery.
+  protocol is the only one: that update moves this file to `v4/*`. Not there yet: the usage battery.
   "Signed in" (the welcome's ZCode row, the accounts panel, the provider pickers) means ready: the `zcode` command answers and a new
   session would have a model to run on. The app asks with a draft session (`persistence: deferred`: ZCode keeps nothing of it until a
   first message, and none is sent) and closes it at once; ZCode's config and keys are never read. The row is optional, like Jev's. By

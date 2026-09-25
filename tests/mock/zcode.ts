@@ -4,7 +4,8 @@
 // messages, subscribe, send, stop, compact) and streams every turn as `session/event` notifications to a subscribed client, the way
 // ZCode's server does. Every message gets one short canned reply that quotes what it got, signed with this machine's name. Markers in
 // a message: [[tool]] runs a tool that asks the host first (interaction/requestPermission), [[slow]] answers slowly (to be stopped),
-// [[fail]] fails the turn. A v4 `sendText` during a turn is folded into it (guide), or with MOCK_ZCODE_STEER=queue queued as a turn of its
+// [[fail]] fails the turn. Images sent with a message are kept as its file parts and named in the reply. v4 `renameSession` sets a
+// custom title. A v4 `sendText` during a turn is folded into it (guide), or with MOCK_ZCODE_STEER=queue queued as a turn of its
 // own after it. MOCK_CONTEXT_TOKENS / MOCK_CONTEXT_WINDOW: what `session/read` says of the context. `workspace/generateText` answers with a
 // canned line naming the model it was given (the voice). Sessions are kept in <ZCODE_DATA_BASE_DIR or ~>/.zcode/mock-sessions/<id>.json. No network, no model.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -50,9 +51,9 @@ async function answer(s, turnId, aid, text, state) {
   for (const piece of replyTo(text).match(/\S+\s*/g) ?? []) { if (state.cut) break; part.text += piece; event(sessionId, turnId, 'part.delta', { messageId: aid, partId: part.partId, field: 'text', delta: piece }); await sleep(text.includes('[[slow]]') ? DELAY * 10 : DELAY); }
   part.text = part.text.trim(); event(sessionId, turnId, 'part.upserted', { part }); return part;
 }
-async function runTurn(s, text, inputId?) {
+async function runTurn(s, text, inputId?, attachments?) {
   const sessionId = s.session.sessionId; const turnId = randomUUID(); const state = { cut: false, inbox: [] as { text: string; inputId: string; pendingInputId: string }[] }; running.set(sessionId, state); const started = Date.now();
-  const userId = randomUUID(); const user = { info: { messageId: userId, sessionId, role: 'user', time: { created: Date.now() }, agent: 'build' }, parts: [{ type: 'text', partId: randomUUID(), sessionId, messageId: userId, text }] };
+  const userId = randomUUID(); const user = { info: { messageId: userId, sessionId, role: 'user', time: { created: Date.now() }, agent: 'build' }, parts: [{ type: 'text', partId: randomUUID(), sessionId, messageId: userId, text }, ...(attachments ?? []).map((a) => ({ type: 'file', partId: randomUUID(), sessionId, messageId: userId, mime: a.mimeType, filename: a.filename, url: `data:${a.mimeType};base64,${a.dataBase64}` }))] };
   s.messages.push(user); if (!s.session.title) { s.session.title = text.replace(/<jauvex-briefing>[\s\S]*?<\/jauvex-briefing>\s*/, '').slice(0, 60); s.session.titleSource = 'first_input'; }
   event(sessionId, turnId, 'turn.started', { turnNumber: s.messages.length, input: text, messageId: userId, ...(inputId ? { inputId } : {}) });
   event(sessionId, turnId, 'part.upserted', { part: user.parts[0] }); // the server shows the user's own message too: the app must not echo it
@@ -92,10 +93,11 @@ const methods = {
   'session/subscribe': (p) => { live(p.sessionId); subscribed.add(p.sessionId); return { sessionId: p.sessionId, eventSeq: seq, events: [] }; },
   'session/send': (p) => {
     const s = live(p.sessionId); if (running.has(p.sessionId)) throw fail(-32010, 'A prompt is already running for this session');
-    setTimeout(() => void runTurn(s, p.content), 0); return { sessionId: p.sessionId, accepted: true, stateRevision: seq };
+    setTimeout(() => void runTurn(s, `${p.content}${p.attachments?.length ? ` [${p.attachments.length} image${p.attachments.length > 1 ? 's' : ''}: ${p.attachments.map((a) => `${a.filename} ${a.mimeType}`).join(', ')}]` : ''}`, undefined, p.attachments), 0); return { sessionId: p.sessionId, accepted: true, stateRevision: seq }; // the reply names the images it got
   },
   'session/read': (p) => ({ ...snapshot(live(p.sessionId)), runtime: { eventSeq: seq, stateRevision: seq, pendingRequestIds: [], ...(CTX > 0 ? { contextUsage: { used: CTX, size: WINDOW } } : {}) } }),
   'v4/command': (p) => { // sendText only: into the running turn (guide), or queued behind it
+    if (p.type === 'renameSession') { const s = live(p.sessionId); s.session.title = p.payload.title; s.session.titleSource = 'custom'; s.session.updatedAt = Date.now(); save(s); return { commandId: p.commandId, status: 'accepted', revisionAtDecision: seq }; }
     if (p.type !== 'sendText') return { commandId: p.commandId, status: 'rejected', reasonCode: 'fault.command.notImplemented', revisionAtDecision: seq };
     const s = live(p.sessionId); const state = running.get(p.sessionId); const pendingInputId = randomUUID();
     if (!state) { setTimeout(() => void runTurn(s, p.payload.text, p.commandId), 0); return { commandId: p.commandId, status: 'accepted', revisionAtDecision: seq, result: { type: 'inputAccepted', delivery: 'startNow', inputId: p.commandId } }; }

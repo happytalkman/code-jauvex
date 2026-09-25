@@ -13,7 +13,7 @@ import { tooLong, type ContextUsage } from '../shared/context.js';
  * `jsonrpc` field) that ZCode's own desktop app runs its agent with. Same config, providers and session store as the ZCode CLI
  * (~/.zcode), so nothing there is parsed by hand. One server process is started on first use and shared by every ZCode chat.
  * The protocol is ZCode's internal one (packages/shared/src/zcode-protocol in github.com/zai-org/ZCode, v3.14.3 read on
- * 2026-09-25): this file uses its `session/*` methods, one `v4/command` (sendText, to steer) and `workspace/generateText` (the voice),
+ * 2026-09-25): this file uses its `session/*` methods, two `v4/command`s (sendText, to steer; renameSession) and `workspace/generateText` (the voice),
  * and the stand-in (tests/mock/zcode.ts) answers the same subset. ZCode says its `session/*` methods go once its v4 protocol is the
  * only one: when a ZCode update drops them, this file moves to `v4/*` (commands and conversation topics).
  *
@@ -144,8 +144,15 @@ export async function transcript(sessionId: string, dir?: string): Promise<ChatM
   const r = await call<{ messages: ZMessage[] }>('session/messages', { sessionId });
   return normalizeMessages(r.messages);
 }
-/** The protocol this app speaks has no rename: the name stays ZCode's (its first message, or the title it generated). */
-export async function rename(): Promise<void> { throw new Error('ZCode sessions cannot be renamed from this app yet.'); }
+/** The name is kept by ZCode itself (v4 `renameSession`: a custom title, which its own title generation then leaves alone), so the
+ * ZCode app and CLI show it too. The session is loaded first: ZCode renames only a session it has open. */
+export async function rename(sessionId: string, name: string, dir?: string): Promise<void> {
+  await load(sessionId, dir);
+  const ack = await call<{ status?: string; message?: string; reasonCode?: string }>('v4/command', { commandId: randomUUID(), clientId: CLIENT_ID, sessionId, type: 'renameSession', payload: { title: name }, issuedAt: Date.now() });
+  if (ack?.status !== 'accepted' && ack?.status !== 'duplicate' && ack?.status !== 'noop') throw new Error(`ZCode did not rename the session: ${ack?.message || ack?.reasonCode || ack?.status || 'no answer'}`);
+}
+/** Images for a message, the way ZCode's desktop sends them (kind/filename/mimeType/dataBase64): ZCode hands them to the model. */
+export const attachmentsOf = (images?: Attachment[]): Record<string, unknown>[] => (images ?? []).map((i) => ({ kind: 'image', filename: i.name || 'image', mimeType: i.mediaType, dataBase64: i.data, sizeBytes: Math.floor((i.data.length * 3) / 4) }));
 /** ZCode's models are the providers in its own config; this protocol lists none, so these are the ones its sessions ran on here. */
 export async function models(): Promise<ModelOption[]> { return seen.map((id) => ({ id, label: id })); }
 export const selection = (model?: string): Selection | undefined => { const i = model ? model.indexOf('/') : -1; return model && i > 0 && i < model.length - 1 ? { providerId: model.slice(0, i), modelId: model.slice(i + 1) } : undefined; };
@@ -179,11 +186,10 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   if (!req.hidden && !project.sessions.includes(sessionId)) project.sessions.unshift(sessionId);
   if (project.providers?.[sessionId] !== 'zcode') { project.providers = { ...project.providers, [sessionId]: 'zcode' }; await saveState(state); }
   send({ chatId, type: 'init', sessionId, ...(model ? { model } : {}) });
-  if (req.images?.length) send({ chatId, type: 'status', text: 'Images are not passed to ZCode sessions yet: only the text went.' });
-  await runTurn(sessionId, chatId, req.compact ? '' : text, send, req.projectId, !!req.compact, model);
+  await runTurn(sessionId, chatId, req.compact ? '' : text, send, req.projectId, !!req.compact, model, req.compact ? undefined : req.images);
 }
 
-function runTurn(id: string, chatId: string, text: string, send: (e: ChatEvent) => void, projectId: string | undefined, compact: boolean, model?: string): Promise<void> {
+function runTurn(id: string, chatId: string, text: string, send: (e: ChatEvent) => void, projectId: string | undefined, compact: boolean, model?: string, images?: Attachment[]): Promise<void> {
   return new Promise<void>((resolve) => {
     let over = false;
     const end = (e: ChatEvent) => { if (over) return; over = true; if (entry.wait) clearTimeout(entry.wait); for (const f of entry.pending.values()) f('deny'); turns.delete(id); if (entry.compact) send({ chatId, type: 'compact', phase: 'done', trigger: 'manual', ok: e.type === 'done' && e.ok }); send(e); resolve(); };
@@ -192,7 +198,7 @@ function runTurn(id: string, chatId: string, text: string, send: (e: ChatEvent) 
       finish: (ok, error, durationMs) => void readContext(entry).finally(() => end({ chatId, type: 'done', ok, sessionId: id, ...(durationMs ? { durationMs } : {}), ...(ok ? {} : { error: error || 'The turn failed.', ...(tooLong(null, error) ? { tooLong: true } : {}) }) })) };
     turns.set(id, entry);
     if (compact) send({ chatId, type: 'compact', phase: 'start', trigger: 'manual' });
-    (compact ? call('session/compact', { sessionId: id }) : call('session/send', { sessionId: id, content: text }))
+    (compact ? call('session/compact', { sessionId: id }) : call('session/send', { sessionId: id, content: text, ...(images?.length ? { attachments: attachmentsOf(images) } : {}) }))
       .catch((e: Error) => { if (turns.get(id) === entry) entry.fail(e.message); });
   });
 }
@@ -230,7 +236,8 @@ export function isRunning(chatId: string): boolean { return !!byChat(chatId); }
 export function liveList(): { chatId: string; projectId: string; sessionId: string | null }[] { return [...turns.values()].filter((t) => t.projectId).map((t) => ({ chatId: t.chatId, projectId: t.projectId!, sessionId: t.sessionId })); }
 const CLIENT_ID = `jauvex-${randomUUID()}`;
 /** A message for the running turn, as ZCode's v4 `sendText` asking to be folded in (guide). False (the window keeps it and sends it when
- * the turn ends) when there is no turn, when it compacts, with images (ZCode folds in text only), or when ZCode does not accept it. */
+ * the turn ends) when there is no turn, when it compacts, with images (ZCode folds text only into a running turn; the images go with the
+ * message after it), or when ZCode does not accept it. */
 export async function steerChat(chatId: string, text: string, images?: Attachment[]): Promise<boolean> {
   const t = byChat(chatId); if (!t || t.compact || t.stopping || images?.length || !text.trim()) return false;
   const commandId = randomUUID(); t.steers.add(commandId);

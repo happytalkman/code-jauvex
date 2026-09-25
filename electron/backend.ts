@@ -190,7 +190,7 @@ export const backend = {
   rename: async (id: string, sessionId: string, title: string) => {
     const { project } = await projectOr404(id); const name = String(title ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
     if (!name) throw new HttpError(400, 'A session needs a name');
-    const by = providerOf(project, sessionId); if (by === 'codex') await codex.rename(sessionId, name); else if (by === 'zcode') await zcode.rename(); else await renameSession(sessionId, name, { dir: project.path });
+    const by = providerOf(project, sessionId); if (by === 'codex') await codex.rename(sessionId, name); else if (by === 'zcode') await zcode.rename(sessionId, name, project.path); else await renameSession(sessionId, name, { dir: project.path });
     return true;
   },
   setPrefs: async (id: string, sessionId: string, prefs: SessionPrefs) => {
