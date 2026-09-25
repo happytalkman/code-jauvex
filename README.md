@@ -132,6 +132,25 @@ HTTP API (`POST /v1/graphs/{graph}/query`, a bearer token, the `x-graph-namespac
   `.github/workflows/weaiddb.yml` builds the image from the fork on a Linux runner, starts it with `scripts/weaiddb.ps1`, and writes and
   reads a small graph with `scripts/graph.ts`.
 
+## A browser agent for the agents (jev-ultrafast)
+
+[jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT, Browser Use with TypeSafe) drives the user's Chrome toward one goal:
+every observation turns the page into a numbered table of elements, TypeSafe's Jev picks the operation (click, type, select, scroll,
+wait, done, blocked) and its target in one request, and a small LLM writes text only when the operation is typing. Every agent can hand
+it a task: Claude sessions with the `browse` tool, any session with `node scripts/browse.ts --url <https://...> --goal "<goal>"`, and the
+briefing says so (one narrow goal per run; check the last page it reports, since its DONE is a choice, not a proof).
+
+- It runs from its own clone (`<home>/jev-ultrafast`, or `JEV_ULTRAFAST_DIR`) and environment: `uv run --project <clone>` runs our
+  `scripts/browse_runner.py`, which uses its `Agent` and prints each step and the result as JSON lines; `shared/browse.ts` turns them into
+  what the agent reads (how it ended, each step, the last page and the elements on it). Nothing of it is copied here.
+- Keys: TypeSafe's is the app's own (TYPESAFE_API_KEY or `~/.typesafe/token`, read by `shared/typesafe.ts` and passed in the run's
+  environment only); the text model's (`TEXT_MODEL_API_KEY`, `TEXT_MODEL`, `TEXT_MODEL_BASE_URL`, an OpenRouter key in its example) is
+  in the clone's `.env`. Chrome: browser-harness connects to the running Chrome (allow remote debugging when Chrome asks), or to
+  `BU_CDP_URL`.
+- Checks: `tests/browse.test.ts` on a stand-in for uv (`tests/mock/uv`). The real runner was also driven here, in jev-ultrafast's own uv
+  environment, against a local page in headless Chromium (`BU_CDP_URL`): it connected, read the page and asked TypeSafe, which refused
+  the placeholder key (a real run needs the user's keys).
+
 ## Setting up on a fresh Mac
 
 Jauvex needs a few things that are not in this repository; the install command and `npm start` take care of most of them. The welcome screen (on the first start, and from Jauvex

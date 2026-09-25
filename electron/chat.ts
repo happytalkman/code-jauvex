@@ -11,6 +11,9 @@ import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import * as claw from './claw.js';
 import * as graphdb from './graphdb.js';
+import { browseSetup, runBrowse } from '../shared/browse.js';
+import { typesafeKey } from './jev.js';
+import os from 'node:os';
 import { claudeExe } from './account.js';
 
 type Live = { push: (text: string, images?: Attachment[]) => void; q: Query; abort: AbortController; pending: Map<string, (d: PermissionDecision) => void>; always: Set<string>; projectId: string; sessionId: string | null };
@@ -162,6 +165,9 @@ function jauvexTools(chatId: string) {
     tool('graph_query', 'Run one OpenCypher query on WEAIDdb, the graph database beside this app (shared by every agent): CREATE, MERGE, MATCH ... RETURN. Values go in parameters, referred to as $name in the query. Answers with the rows as JSON, or why there are none (not running, a syntax error). A subset of OpenCypher: every node has an integer id you choose (node scripts/graph.ts newid prints a fresh one); writes are CREATE or MERGE of a relationship path, changes MATCH ... SET, reads MATCH ... RETURN n.prop.',
       { query: z.string().describe('One OpenCypher statement, e.g. MATCH (n:Note {project: $p}) RETURN n.text LIMIT 20'), parameters: z.record(z.string(), z.unknown()).optional().describe('Values for the $names in the query') },
       async ({ query, parameters }) => { const r = await graphdb.query(query, parameters); return { content: [{ type: 'text' as const, text: r.text }], ...(r.ok ? {} : { isError: true }) }; }),
+    tool('browse', "Do one thing in the user's Chrome with the browser agent (jev-ultrafast): it opens the URL and works toward the goal on its own, clicking, typing and choosing, then says how it ended, each step, and what was on the last page. For tasks on real web pages (search a site, fill a form, find a page); it takes a minute or two. One narrow goal, and say when to stop.",
+      { url: z.string().describe('The page to start on, https://...'), goal: z.string().describe('What to do there, and when to stop, in one or two sentences'), max_seconds: z.number().optional().describe('Give up after this long (default 180)') },
+      async ({ url, goal, max_seconds }) => { const r = await runBrowse(browseSetup(os.homedir(), APP_ROOT), url, goal, await typesafeKey(), { maxSeconds: max_seconds ?? 180 }); return { content: [{ type: 'text' as const, text: r.text }], ...(r.ok ? {} : { isError: true }) }; }),
   ] });
 }
 export async function steerChat(chatId: string, text: string, images?: Attachment[]): Promise<boolean> {
