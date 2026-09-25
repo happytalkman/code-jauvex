@@ -15,7 +15,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     env:
-      JAUVEX_DIR: ${{ runner.temp }}\jauvex
       JAUVEX_BRANCH: ${{ github.ref_name }}
       JAUVEX_NO_START: '1'
     steps:
@@ -29,14 +28,16 @@ jobs:
           if (Get-Command winget -ErrorAction SilentlyContinue) { 'winget: yes' } else { 'winget: no' }
       - name: The one-line install, as a user runs it
         shell: powershell
-        run: irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/windows-start.ps1" | iex
+        run: |
+          $env:JAUVEX_DIR = Join-Path $env:RUNNER_TEMP 'jauvex'  # the runner context is not there in a job's env
+          irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/windows-start.ps1" | iex
       - name: Start the app and drive it
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           # the Node the install chose (it may have put one first on the PATH)
           $env:Path = "$env:ProgramFiles\nodejs;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
-          Set-Location $env:JAUVEX_DIR; node -v
+          $env:JAUVEX_DIR = Join-Path $env:RUNNER_TEMP 'jauvex'; Set-Location $env:JAUVEX_DIR; node -v
           $data = Join-Path $env:RUNNER_TEMP 'jxdata'; New-Item -ItemType Directory -Force $data | Out-Null
           $env:CVC_DATA_DIR = $data; $env:CVC_JAUVEX_HOME = Join-Path $data 'home'; $env:CVC_WEB_OPEN = '0'; $env:CVC_WEB_TOKEN = 'ci-token'; $env:CVC_WEB_PORT = '4343'
           $log = Join-Path $env:RUNNER_TEMP 'web.log'
