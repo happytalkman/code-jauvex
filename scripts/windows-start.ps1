@@ -2,12 +2,13 @@
 #   irm https://raw.githubusercontent.com/happytalkman/code-jauvex/claude/awesome-pasteur-ndvvom/scripts/windows-start.ps1 | iex
 # or, in a copy already here: double-click start-windows.cmd. What is missing is installed (Node and Git with winget, the app's packages,
 # the voice with npm run voice:setup), what is there is kept, and the app starts (npm run web) and opens the browser. Run it again any time:
-# it only does what is still missing, then starts the app. JAUVEX_DIR moves the copy (default: <home>\jauvex), JAUVEX_BRANCH picks the branch.
+# it only does what is still missing, then starts the app. JAUVEX_DIR moves the copy (default: <home>\jauvex), JAUVEX_BRANCH picks the branch,
+# JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml).
 $ErrorActionPreference = 'Stop'
 $repo = 'https://github.com/happytalkman/code-jauvex'
 $branch = if ($env:JAUVEX_BRANCH) { $env:JAUVEX_BRANCH } else { 'claude/awesome-pasteur-ndvvom' }
 function Say($t) { Write-Host "`n== $t" -ForegroundColor Cyan }
-function Fail($t) { Write-Host "`n$t" -ForegroundColor Red; Read-Host 'Press Enter to close'; exit 1 }
+function Fail($t) { Write-Host "`n$t" -ForegroundColor Red; if (-not $env:CI) { Read-Host 'Press Enter to close' }; exit 1 }
 function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Refresh-Path { $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') }
 function Winget($id, $what) {
@@ -17,9 +18,13 @@ function Winget($id, $what) {
 }
 
 # Node 22.18 or newer: the app's scripts are TypeScript that Node runs as it is.
-$nodeOk = $false
-if (Has 'node') { $v = [version]((node -v).TrimStart('v')); $nodeOk = $v -ge [version]'22.18.0' }
-if (-not $nodeOk) { Winget 'OpenJS.NodeJS.LTS' 'Node.js'; if (-not (Has 'node')) { Fail 'Node.js was installed but this window does not see it yet: close it, open a new PowerShell, run the same command again.' } }
+function Node-Ok { if (-not (Has 'node')) { return $false }; try { [version]((node -v).TrimStart('v')) -ge [version]'22.18.0' } catch { $false } }
+if (-not (Node-Ok)) {
+  if (Has 'node') { Write-Host "Node $(node -v) is too old: the app needs 22.18 or newer." -ForegroundColor Yellow }
+  Winget 'OpenJS.NodeJS.LTS' 'Node.js'
+  if (-not (Node-Ok)) { $env:Path = "$env:ProgramFiles\nodejs;$env:Path" } # an older Node earlier on the PATH still answers first
+  if (-not (Node-Ok)) { Fail 'Node.js 22.18 or newer is not reachable yet: close this window, open a new PowerShell, run the same command again. (An older Node from nvm or another installer may come first on the PATH.)' }
+}
 if (-not (Has 'git')) { Winget 'Git.Git' 'Git'; if (-not (Has 'git')) { Fail 'Git was installed but this window does not see it yet: close it, open a new PowerShell, run the same command again.' } }
 
 # The copy: this folder when the script runs from one, else <home>\jauvex (cloned the first time, brought up to date after).
@@ -37,5 +42,6 @@ npm.cmd run voice:setup; if ($LASTEXITCODE) { Write-Host 'The voice is not ready
 # Claude and Codex themselves come with npm install; their command lines are only for signing in (the app signs no one in).
 $signIn = @{ claude = 'npm install -g @anthropic-ai/claude-code, then: claude auth login'; codex = 'npm install -g @openai/codex, then: codex login'; zcode = 'build it from github.com/zai-org/ZCode (pnpm build:zcode) and put zcode on the PATH' }
 foreach ($p in $signIn.Keys) { if (-not (Has $p)) { Write-Host "No $p command here. To use its sessions: $($signIn[$p])" -ForegroundColor Yellow } }
+if ($env:JAUVEX_NO_START -eq '1') { Say "Ready in $dir (not started: JAUVEX_NO_START)"; return }
 Say 'Starting the app: the browser opens on it. Ctrl+C here stops it.'
 npm.cmd run web

@@ -1,0 +1,71 @@
+# The web version on real Windows: the one-line install from GitHub (scripts/windows-start.ps1) on a clean machine, then the app's
+# server driven over its API: the state, the voice's setup, Windows' own speech (System.Speech) and whisper-server hearing it.
+name: windows
+on:
+  push:
+    branches: ['claude/**', 'master']
+    paths: ['scripts/windows-start.ps1', 'scripts/voice-setup.ts', 'electron/web.ts', 'electron/voice.ts', 'shared/web.ts', 'package.json', '.github/workflows/windows.yml']
+  workflow_dispatch:
+jobs:
+  web:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['as-it-comes', '22']
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      JAUVEX_DIR: ${{ runner.temp }}\jauvex
+      JAUVEX_BRANCH: ${{ github.ref_name }}
+      JAUVEX_NO_START: '1'
+    steps:
+      - if: matrix.node != 'as-it-comes'
+        uses: actions/setup-node@v4
+        with: { node-version: '${{ matrix.node }}' }
+      - name: What the machine has
+        shell: powershell
+        run: |
+          node -v; git --version; $PSVersionTable.PSVersion.ToString()
+          if (Get-Command winget -ErrorAction SilentlyContinue) { 'winget: yes' } else { 'winget: no' }
+      - name: The one-line install, as a user runs it
+        shell: powershell
+        run: irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/windows-start.ps1" | iex
+      - name: Start the app and drive it
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # the Node the install chose (it may have put one first on the PATH)
+          $env:Path = "$env:ProgramFiles\nodejs;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          Set-Location $env:JAUVEX_DIR; node -v
+          $data = Join-Path $env:RUNNER_TEMP 'jxdata'; New-Item -ItemType Directory -Force $data | Out-Null
+          $env:CVC_DATA_DIR = $data; $env:CVC_JAUVEX_HOME = Join-Path $data 'home'; $env:CVC_WEB_OPEN = '0'; $env:CVC_WEB_TOKEN = 'ci-token'; $env:CVC_WEB_PORT = '4343'
+          $log = Join-Path $env:RUNNER_TEMP 'web.log'
+          $p = Start-Process npm.cmd -ArgumentList 'run', 'web' -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -NoNewWindow
+          $fails = 0; function Check($name, $ok, $got) { if ($ok) { Write-Host "PASS $name" } else { Write-Host "FAIL $name $got" -ForegroundColor Red; $script:fails++ } }
+          try {
+            $t = 0; while (-not ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'runs in your browser')) { Start-Sleep 2; $t += 2; if ($t -gt 300 -or $p.HasExited) { Get-Content $log, "$log.err" -ErrorAction SilentlyContinue; throw 'the web server did not start' } }
+            Check 'npm run web starts the server' $true ''
+            function Rpc($name, $argsList) { $body = @{ name = $name; args = $argsList; undef = @() } | ConvertTo-Json -Depth 8 -Compress; (Invoke-RestMethod -Uri 'http://127.0.0.1:4343/rpc' -Method Post -ContentType 'application/json' -Headers @{ 'x-jauvex-token' = 'ci-token' } -Body $body -TimeoutSec 120) }
+            $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:4343/' -TimeoutSec 30
+            Check 'the page is served' ($page.StatusCode -eq 200 -and $page.Content -match '<div id="root">') $page.StatusCode
+            $st = Rpc 'api' @('state'); Check 'the backend answers' ($st.ok) ($st | ConvertTo-Json -Depth 3 -Compress)
+            $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
+            Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''
+            Check 'setup: whisper-server is found' ($sc.whisperBinary) ''
+            Check 'setup: the models are there' ($sc.models.Count -ge 1) ($sc.models -join ',')
+            $sp = Rpc 'voice:speak' @('Hello from Windows.', '', 185); $wav = [Convert]::FromBase64String($sp.value.'$ab')
+            Check 'Windows speaks: a WAV comes back' ($wav.Length -gt 10000 -and [Text.Encoding]::ASCII.GetString($wav, 0, 4) -eq 'RIFF') "$($wav.Length) bytes $($sp.error)"
+            $on = Rpc 'voice:on' @($true, 'ci'); $t = 0
+            do { Start-Sleep 2; $t += 2; $vs = (Rpc 'voice:status' @()).value } while ($vs.whisper -eq 'starting' -and $t -lt 180)
+            Check 'whisper-server starts' ($vs.whisper -eq 'ready') "$($vs.whisper): $($vs.detail)"
+            # a sentence spoken by Windows, 16 kHz as the browser sends it, heard by whisper-server
+            Add-Type -AssemblyName System.Speech; $f = Join-Path $env:RUNNER_TEMP 'said.wav'; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+            $s.SetOutputToWaveFile($f, (New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo 16000, ([System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen), ([System.Speech.AudioFormat.AudioChannel]::Mono))); $s.Speak('Please open the settings and start a new agent.'); $s.Dispose()
+            $heard = Rpc 'voice:transcribe' @(@{ '$ab' = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f)) }, 'en'); Write-Host "heard: $($heard.value.text) $($heard.error)"
+            Check 'whisper-server hears what Windows said' ($heard.value.text -match 'settings') "$($heard.value.text) $($heard.error)"
+            Rpc 'voice:on' @($false, 'ci') | Out-Null
+          } finally {
+            taskkill /PID $p.Id /T /F | Out-Null  # this server's tree, by its pid
+            Write-Host '--- server log'; Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 40
+          }
+          if ($fails) { throw "$fails FAILED" } else { Write-Host 'ALL PASS' }
