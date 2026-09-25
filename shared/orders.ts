@@ -8,6 +8,11 @@
 export const JEV_MIN_CONFIDENCE = 0.6; // below this Jev's pick is not taken: the voice model is asked instead
 export const JEV_SURE = 0.85;          // at or above this, Jev's word alone makes the app act; between the two, it asks
 
+/** The kind of agent named in what was said, as speech-to-text writes it: Claude as "Cloud", Codex as "codecs", ZCode as "Z code" or
+ * "zed code", Jev as "Jeff", "Jet" or "Jab". ZCode is looked for first: its words contain "code". Null when none was named. */
+const AGENT_WORDS: ['zcode' | 'codex' | 'jev' | 'claude', RegExp][] = [['zcode', /\b(z ?-?code|zed ?code|zee ?code|zhipu|glm)\b/i], ['codex', /\b(codex|codecs|code ?x|kodex|chat ?gpt|open ?ai|gpt)\b/i], ['jev', /\b(jev|jeff|jet|jab|jav|jeb|classifier)\b/i], ['claude', /\b(claude|cloud|clod|claud|clawed|anthropic)\b/i]];
+export const agentKindSaid = (text: string): 'zcode' | 'codex' | 'jev' | 'claude' | null => AGENT_WORDS.find(([, re]) => re.test(text))?.[0] ?? null;
+
 export type OrderVerdict = 'act' | 'ask' | 'pass';
 /** exact: the words are the order and nothing else ("restart the app"). jev: its pick (for the app or the agent) and how sure.
  *  model: what the voice model read, when it was asked (null: not asked, or no usable answer). */

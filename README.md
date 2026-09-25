@@ -41,6 +41,10 @@ settings after) checks each of them and tells you what is missing.
    itself: Anthropic does not let apps built on its Agent SDK offer the Claude.ai login. The welcome screen and the accounts
    panel (the Jauvex button below the sidebar) say who is signed in and give the command; with one signed in, the Jauvex
    agent can walk you through the other.
+3. **ZCode, optional**: a third provider (first cut). Build it from [github.com/zai-org/ZCode](https://github.com/zai-org/ZCode)
+   (`pnpm build:zcode`) and put its `zcode` on the PATH, then give it a model: `zcode login` for its own account, or a provider
+   with an API key in its settings (here ZCode runs on API-key providers only, see "How it is built"). The welcome screen and the
+   accounts panel count it as ready once the command answers and a new ZCode session would have a model to run on.
 4. **whisper.cpp for the ears**: `npm start` installs it with Homebrew if it is missing and downloads the two models into
    `models/` (git-ignored): `ggml-small-q5_1.bin` for the transcript and `ggml-base-q5_1.bin` for the live words while you
    speak. Each is checked against the size and SHA-256 Hugging Face lists for it (`scripts/models.sh`): a download goes to a
@@ -527,8 +531,13 @@ Press the white round button in the message box. All local except the two Claude
   session here (the protocol lists no models, so the choices are the ones ZCode sessions ran on here). The server runs its requests one at
   a time, so a voice line asked during a turn holds a steer for as long as it takes. ZCode says its `session/*` methods go once its v4
   protocol is the only one: that update moves this file to `v4/*`. Not there yet: images, renaming, the usage battery.
-  "Signed in" means the `zcode` command answers.
-  Checked in `tests/zcode-provider.test.ts`.
+  "Signed in" (the welcome's ZCode row, the accounts panel, the provider pickers) means ready: the `zcode` command answers and a new
+  session would have a model to run on. The app asks with a draft session (`persistence: deferred`: ZCode keeps nothing of it until a
+  first message, and none is sent) and closes it at once; ZCode's config and keys are never read. The row is optional, like Jev's. By
+  voice, ZCode is heard as "Z code", "zed code" or "zee code" (`agentKindSaid` in `shared/orders.ts`, also for "a new Z code agent");
+  `scripts/jauvex.ts` takes `--provider zcode` and refuses a provider it does not know. The checks never meet a real `zcode` on the PATH
+  (`tests/run.sh` points `CVC_ZCODE_BIN` nowhere unless a check names the stand-in). Checked in `tests/zcode-provider.test.ts`,
+  `tests/orders.test.ts` and `tests/welcome-intent.test.ts`.
 - `electron/chat.ts` routes each turn by the session's provider; every provider sends the UI the same `ChatEvent`s.
 - Two threads per chat. The main thread is the session itself (Claude or Codex, the model in the picker). The voice
   thread is a small model **from the same provider** (Haiku for Claude sessions; for Codex sessions the account's fast,

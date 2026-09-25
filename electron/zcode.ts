@@ -87,6 +87,18 @@ type ZEvent = { sessionId: string; turnId?: string; type: string; payload?: Reco
 /** The models ZCode sessions ran on here, "provider/model", newest first: ZCode has no list of its own in this protocol. */
 const seen: string[] = []; let lastDir = '';
 const saw = (m?: Selection): string | undefined => { if (!m) return undefined; const id = `${m.providerId}/${m.modelId}`; const i = seen.indexOf(id); if (i >= 0) seen.splice(i, 1); seen.unshift(id); return id; };
+/** Is ZCode ready to run a turn here? Its CLI answers, and it has a model: a draft session (persistence deferred: ZCode keeps nothing of
+ * it until a first message, and none is sent) says which model a new session would run on, then it is closed. ZCode's config and keys
+ * are never read by this app. The model found also becomes the voice's automatic choice. */
+export async function readiness(): Promise<{ version: string | null; model: string | null; error?: string }> {
+  const v = await version(); if (v === null) return { version: null, model: null, error: 'The zcode command was not found.' };
+  try {
+    const snap = await call<Snapshot>('session/create', { workspace: workspace(os.tmpdir()), persistence: 'deferred', titleGenerationEnabled: false });
+    void call('session/close', { sessionId: snap.session.sessionId, expectedPersistence: 'deferred' }).catch(() => {});
+    const model = saw(snap.session.model) ?? null;
+    return { version: v, model, ...(model ? {} : { error: 'ZCode has no model to run on: sign in with zcode login, or add a provider with an API key in ZCode.' }) };
+  } catch (e) { return { version: v, model: null, error: `ZCode did not answer: ${(e as Error).message}` }; }
+}
 /** A folder in the protocol's terms: a local folder is its own key (ZCode's buildWorkspaceRef). */
 const workspace = (dir: string): Workspace => ({ workspacePath: dir, workspaceKey: dir });
 

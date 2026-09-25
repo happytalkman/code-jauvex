@@ -24,7 +24,7 @@ const dir = path.join(process.env.ZCODE_DATA_BASE_DIR || os.homedir(), '.zcode',
 // sessions: { session, messages: [{ info, parts }] }
 const sessions = new Map();
 if (existsSync(dir)) for (const f of readdirSync(dir)) if (f.endsWith('.json')) { try { const s = JSON.parse(readFileSync(path.join(dir, f), 'utf8')); sessions.set(s.session.sessionId, s); } catch { /* a broken file */ } }
-const save = (s) => { mkdirSync(dir, { recursive: true }); writeFileSync(path.join(dir, `${s.session.sessionId}.json`), JSON.stringify(s)); };
+const save = (s) => { delete s.deferred; mkdirSync(dir, { recursive: true }); writeFileSync(path.join(dir, `${s.session.sessionId}.json`), JSON.stringify(s)); };
 const loaded = new Set(); const subscribed = new Set(); const running = new Map(); // sessionId -> { cut }
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const get = (id) => { const s = sessions.get(id); if (!s) throw fail(-32004, `no session ${id}`); return s; };
@@ -83,8 +83,8 @@ const methods = {
   'session/create': (p) => {
     if (p.sessionId) throw fail(-32602, 'sessionId is only supported for imported history creates');
     const sessionId = randomUUID(); const now = Date.now();
-    const s = { session: { sessionId, workspace: p.workspace, sessionKind: 'interactive', title: '', mode: p.mode ?? 'build', status: 'idle', ...(p.model ? { model: p.model } : { model: { providerId: 'mock', modelId: 'mock-1' } }), createdAt: now, updatedAt: now }, messages: [] };
-    sessions.set(sessionId, s); loaded.add(sessionId); save(s); return snapshot(s);
+    const s = { session: { sessionId, workspace: p.workspace, sessionKind: 'interactive', title: '', mode: p.mode ?? 'build', status: 'idle', ...(p.model ? { model: p.model } : { model: { providerId: 'mock', modelId: 'mock-1' } }), createdAt: now, updatedAt: now }, messages: [] as any[], deferred: false };
+    sessions.set(sessionId, s); loaded.add(sessionId); if (p.persistence !== 'deferred') save(s); else s.deferred = true; return snapshot(s); // a draft is kept only once a message is sent
   },
   'session/resume': (p) => { const s = get(p.sessionId); loaded.add(p.sessionId); return snapshot(s); },
   'session/list': (p) => ({ sessions: [...sessions.values()].filter((s) => s.messages.length && (!p.workspace || s.session.workspace.workspacePath === p.workspace.workspacePath)).map((s) => s.session).sort((a, b) => b.updatedAt - a.updatedAt) }),
@@ -106,6 +106,7 @@ const methods = {
   },
   'workspace/generateText': (p) => ({ text: `(mock ZCode voice ${p.selection.providerId}/${p.selection.modelId}) ${String(p.messages?.at(-1)?.content ?? p.prompt ?? '').replace(/\s+/g, ' ').slice(0, 60)}`, selection: p.selection, finishReason: 'stop' }),
   'workspace/cancelGenerateText': (p) => ({ operationId: p.operationId, cancelled: false }),
+  'session/close': (p) => { const s = live(p.sessionId); if (p.expectedPersistence === 'deferred' && !s.deferred) return { closed: false }; loaded.delete(p.sessionId); subscribed.delete(p.sessionId); if (s.deferred) sessions.delete(p.sessionId); return { closed: true }; },
   'session/stop': (p) => { const r = running.get(p.sessionId); if (r) r.cut = true; return {}; },
   'session/compact': (p) => {
     const s = live(p.sessionId); if (running.has(p.sessionId)) throw fail(-32010, 'A prompt is already running for this session');

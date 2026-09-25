@@ -12,7 +12,8 @@ import * as debug from './debug.js';
  *           the app, and if it asks for something (a pasted code) the user can type it there.
  *   Codex:  the app-server's account API (`account/read`, `account/login/start` with the ChatGPT flow, `account/logout`);
  *           the browser is opened on the URL it returns and `account/login/completed` says when it is done.
- *   ZCode:  whether its CLI answers (`zcode --version`); it signs in and keeps its API keys in its own config (`zcode login`).
+ *   ZCode:  ready when its CLI answers and a new session would have a model to run on (a draft session, closed at once); it signs in
+ *           and keeps its API keys in its own config (`zcode login`).
  * Only what the panel shows leaves here (signed in or not, the e-mail, the plan). Tokens and keys are never read.
  */
 const ROOT = process.env.CVC_ROOT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -36,7 +37,7 @@ export async function status(provider: Provider): Promise<AccountStatus> {
       const j = JSON.parse(r.out.slice(r.out.indexOf('{'))) as { loggedIn?: boolean; email?: string; subscriptionType?: string; authMethod?: string; apiProvider?: string };
       return { provider, signedIn: !!j.loggedIn, who: j.email ?? '', plan: j.subscriptionType ?? '', method: j.authMethod ?? j.apiProvider ?? '' };
     }
-    if (provider === 'zcode') { const v = await zcode.version(); return v === null ? { provider, signedIn: false, who: '', plan: '', method: '', error: 'The zcode command was not found.' } : { provider, signedIn: true, who: '', plan: '', method: v ? `ZCode CLI ${v}` : 'ZCode CLI' }; }
+    if (provider === 'zcode') { const r = await zcode.readiness(); return { provider, signedIn: !!r.model, who: r.model ?? '', plan: '', method: r.version ? `ZCode CLI ${r.version}` : '', ...(r.error ? { error: r.error } : {}) }; } // ready = a model to run on; who = that model
     const r = await codex.account();
     const a = r.account; if (!a) return { provider, signedIn: false, who: '', plan: '', method: '' };
     return { provider, signedIn: true, who: a.type === 'chatgpt' ? a.email ?? '' : '', plan: a.type === 'chatgpt' ? String(a.planType ?? '') : '', method: a.type === 'chatgpt' ? 'ChatGPT' : a.type };

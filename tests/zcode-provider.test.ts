@@ -31,6 +31,14 @@ check('"provider/model" is a model selection', JSON.stringify(zcode.selection('z
 
 // ---- through the stand-in
 const p = (await backend.state()).projects.find((x) => x.name === 'scratch')!;
+// ready: the CLI answers and a new session would have a model; the draft session that tells it is not kept
+const account = await import('../electron/account.ts');
+const ready = await account.status('zcode');
+check('ZCode is ready when its CLI answers and it has a model', ready.signedIn && ready.who === 'mock/mock-1' && /ZCode CLI 0\.0\.0/.test(ready.method), JSON.stringify(ready));
+check('... and the draft session that told it is not kept', !(await backend.sessions(p.id)).some((s) => s.provider === 'zcode'));
+const realBin = process.env.CVC_ZCODE_BIN; process.env.CVC_ZCODE_BIN = path.resolve('tmp/no-zcode'); zcode.shutdown();
+const missing = await account.status('zcode'); process.env.CVC_ZCODE_BIN = realBin; zcode.shutdown();
+check('no zcode command: not ready, and it says so', !missing.signedIn && /not found/.test(missing.error ?? ''), JSON.stringify(missing));
 let n = 0; const start = (sessionId: string | null, text: string, on: (e: Ev) => void = () => {}) => { const evs: Ev[] = []; const chatId = `zcode-check-${++n}`; const done = chat.startChat({ chatId, projectId: p.id, sessionId, provider: 'zcode', text }, (e) => { evs.push(e); on(e); }).then(() => evs); return { chatId, done }; };
 
 const t1 = await start(null, 'hello there').done; const sid = (t1.find((e) => e.type === 'init') as { sessionId?: string } | undefined)?.sessionId ?? '';

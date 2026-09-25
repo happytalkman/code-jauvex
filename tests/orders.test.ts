@@ -1,5 +1,5 @@
 // When the app carries out an order said to it and when it asks first (shared/orders.ts).
-import { answerIs, orderVerdict, stopSaysMore } from '../shared/orders.ts';
+import { agentKindSaid, answerIs, orderVerdict, stopSaysMore } from '../shared/orders.ts';
 let failed = 0; const check = (name: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` ${detail}` : ''}`); if (!ok) failed++; };
 
 // The case that opened a new agent nobody asked for: Jev leaned to the agent (0.55, not sure), the voice model read an order.
@@ -21,4 +21,7 @@ check('"not that" is a no', answerIs('Not that.') === 'no');
 // A stop's words (2026-09-23): "list, list, list, before you do anything, stop" was dropped whole, and never shown.
 check('a stop that asks for something carries its words on', stopSaysMore('Okay, wait a second. List, list, list. Before you do anything, stop.') && stopSaysMore('Stop, use the other folder instead.'));
 check('a bare stop carries nothing', !stopSaysMore('Stop.') && !stopSaysMore('Stop, stop!') && !stopSaysMore('Hold on, stop that.') && !stopSaysMore('Okay, wait a second. Before you do anything, stop.') && !stopSaysMore('No no no, stop it now'));
+// The kind of agent named in an order, as speech-to-text writes it; ZCode's words contain "code", so it must not be read as Codex.
+for (const [said, kind] of [['make a new Z code agent in homepage', 'zcode'], ['open a zed code session', 'zcode'], ['start a ZCode agent', 'zcode'], ['a new zee code chat', 'zcode'], ['a new codecs agent', 'codex'], ['new Codex agent please', 'codex'], ['a new cloud agent', 'claude'], ['a Jeff agent for this', 'jev'], ['write the code for the agent list', null], ['a new agent', null]] as const)
+  check(`"${said}" names ${kind ?? 'no kind'}`, agentKindSaid(said) === kind, `got ${agentKindSaid(said)}`);
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);
