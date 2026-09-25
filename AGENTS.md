@@ -13,7 +13,8 @@ side, by voice or by text. Providers today: Claude (Claude Agent SDK, `electron/
 (`electron/jev.ts`, `web/src/JevPad.tsx`) are typed classifiers from TypeSafe, not chats. `README.md` describes every
 feature and why it works the way it does: read the relevant part before changing a feature, and update it in the same commit.
 
-- `electron/` main process: `main.ts` (window, IPC), `backend.ts` (state, sessions), `chat.ts`, `codex.ts`, `voice.ts`
+- `electron/` main process: `main.ts` (window, IPC), `web.ts` (the web version, `npm run web`: the same calls over HTTP; keep it in step
+  with `main.ts`, `tests/web.test.ts` checks every channel), `backend.ts` (state, sessions), `chat.ts`, `codex.ts`, `voice.ts`
   (Whisper, `say`, the voice helper, all voice decisions), `jev.ts`, `usage.ts`, `debug.ts`.
 - `web/src/` the window: `App.tsx` (sidebar, `Chat`, `Composer`, debugger), `voice.ts` (VAD and playback), `Orb.tsx`.
 - `shared/types.ts` types and the texts both sides share; `shared/roster.ts` session titles, unique short ids and the

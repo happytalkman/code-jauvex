@@ -25,15 +25,15 @@ let server: Server | null = null;
 // The npm package ships the native binary per platform, plus the tools it expects on its PATH (rg).
 function findCodex(): { bin: string; pathDir: string | null } {
   if (process.env.CVC_CODEX_BIN) return { bin: process.env.CVC_CODEX_BIN, pathDir: null }; // the stand-in (tests/mock/codex): checks with no account
-  const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-${process.platform === 'darwin' ? 'apple-darwin' : 'unknown-linux-musl'}`;
+  const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-${process.platform === 'darwin' ? 'apple-darwin' : process.platform === 'win32' ? 'pc-windows-msvc' : 'unknown-linux-musl'}`;
   const vendor = path.join(ROOT, 'node_modules', '@openai', `codex-${process.platform}-${process.arch}`, 'vendor', triple);
-  const bin = path.join(vendor, 'bin', 'codex');
+  const bin = path.join(vendor, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');
   return existsSync(bin) ? { bin, pathDir: path.join(vendor, 'codex-path') } : { bin: 'codex', pathDir: null }; // else: whatever `codex` the shell PATH has
 }
 
 function boot(): Server {
   const { bin, pathDir } = findCodex();
-  const child = spawn(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...(pathDir ? { PATH: `${pathDir}:${process.env.PATH ?? ''}` } : {}) } });
+  const child = spawn(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...(pathDir ? { PATH: `${pathDir}${path.delimiter}${process.env.PATH ?? ''}` } : {}) } });
   const s: Server = { child, nextId: 1, waiting: new Map(), ready: Promise.resolve() };
   let stderr = ''; child.stderr?.on('data', (d: Buffer) => { stderr = (stderr + d.toString()).slice(-600); });
   const down = (why: string) => {

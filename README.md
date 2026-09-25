@@ -27,6 +27,34 @@ repository instead: `npm start` runs it from the clone, and `npm run app` makes 
 (`scripts/mac-app.ts`: Electron's app renamed Jauvex, with the built app, the Whisper models, Claude and Codex inside, signed
 ad hoc on your Mac).
 
+## The web version (Windows)
+
+Where the desktop app does not run, the same app runs in a browser, text only (no voice yet: it needs `say` and whisper-server, on a
+Mac). On Windows, with Node 22.18 or newer and Git:
+
+```
+git clone <this repository> jauvex && cd jauvex
+npm install
+npm run web
+```
+
+`npm run web` builds the window, starts a small local server (`electron/web.ts`, no Electron) and opens the browser on the link it
+prints, `http://127.0.0.1:4343/?token=...`. Stop it with Ctrl+C; start it again the same way. Sign in to the agents with their own
+command lines first, as on a Mac (`claude auth login`, `codex login`; ZCode's `zcode` on the PATH). A folder is added by typing its
+path (a browser has no folder dialog); images are attached with the paperclip, pasted or dropped.
+
+How it works: the server answers the window's calls by the same channel names as the desktop app's IPC (`POST /rpc`) and sends what the
+main process would send to the window as server-sent events (`GET /events`); the window gets its `window.desktop` from
+`web/src/webDesktop.ts` instead of the preload. `tests/web.test.ts` keeps the two in step: every channel of `electron/preload.ts` must have
+a handler in `electron/web.ts`, and every method a counterpart in the browser bridge. JSON turns an undefined argument into null, which the
+IPC does not: the window says which arguments were undefined and the server restores them (`shared/web.ts`); without it a reopened session
+showed an empty page. It listens on 127.0.0.1 only; every call needs the token of this run, and a request whose Host is not this machine's
+is refused (no other site reaches it by DNS tricks). One copy per data folder, like the desktop app: a lock (`web.lock`, with its pid) and
+no start while the desktop app holds that folder. `CVC_WEB_PORT` moves it off 4343, `CVC_WEB_OPEN=0` does not open the browser. Not in
+the web version: the voice, the floating voice bar, pages and PDFs in the right pane, opening a file with the system. `scripts/jauvex.ts`
+works as with the desktop app while a browser tab is open. On Windows, Claude and Codex come from their own Windows packages
+(`claude-agent-sdk-win32-*`, `codex-win32-*`, installed by `npm install`), and ZCode's `zcode.cmd` is started through the shell.
+
 ## Setting up on a fresh Mac
 
 Jauvex needs a few things that are not in this repository; the install command and `npm start` take care of most of them. The welcome screen (on the first start, and from Jauvex

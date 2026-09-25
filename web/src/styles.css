@@ -31,6 +31,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* title bar: drag region, traffic lights sit at the far left */
 .titlebar { grid-area: tb; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 92px; -webkit-app-region: drag; position: relative; z-index: 2; }
+.is-web .titlebar { padding-left: 14px; } /* in a browser there are no traffic lights to leave room for */
 .titlebar::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--side-w); background: var(--side); z-index: -1; }
 .app.no-sidebar .titlebar::before { display: none; }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }

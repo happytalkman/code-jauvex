@@ -36,9 +36,11 @@ let server: Server | null = null;
 
 // CVC_ZCODE_BIN: the stand-in (tests/mock/zcode) in the checks, or a ZCode build elsewhere than the PATH.
 const zcodeBin = (): string => process.env.CVC_ZCODE_BIN || 'zcode';
+// On Windows a CLI installed by npm or pnpm is a .cmd script, which only a shell can start (the arguments here are fixed words).
+const viaShell = process.platform === 'win32';
 
 function boot(): Server {
-  const child = spawn(zcodeBin(), ['app-server'], { cwd: os.homedir(), stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
+  const child = spawn(zcodeBin(), ['app-server'], { cwd: os.homedir(), shell: viaShell, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
   const s: Server = { child, nextId: 1, waiting: new Map() };
   let stderr = ''; child.stderr?.on('data', (d: Buffer) => { stderr = (stderr + d.toString()).slice(-600); });
   child.stdin?.on('error', () => { /* a binary that is missing or gone: said by the exit below */ });
@@ -68,7 +70,7 @@ function call<T>(method: string, params: unknown): Promise<T> {
 /** Is ZCode's CLI on this Mac? Its models and keys live in its own config (~/.zcode), which this app does not read: a CLI that
  * answers `--version` counts as ready, and a provider it lacks shows as that turn's error. */
 export function version(): Promise<string | null> {
-  return new Promise((resolve) => { const c = spawn(zcodeBin(), ['--version'], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } }); let out = '';
+  return new Promise((resolve) => { const c = spawn(zcodeBin(), ['--version'], { shell: viaShell, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } }); let out = '';
     const timer = setTimeout(() => { c.kill(); resolve(null); }, 10_000);
     c.stdout?.on('data', (d: Buffer) => { out += d.toString(); }); c.on('error', () => { clearTimeout(timer); resolve(null); }); c.on('exit', (code) => { clearTimeout(timer); resolve(code === 0 ? out.trim().split('\n')[0] ?? '' : null); }); });
 }
