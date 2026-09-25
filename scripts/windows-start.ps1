@@ -135,14 +135,23 @@ if ($withPaperclip) {
       # check: Paperclip refused to start on Node 22.23 from C:\Program Files\nodejs while Node 24 came first on the PATH)
       if (-not (Node-Ok)) { throw "Paperclip needs Node.js $nodeMin or newer; node is $(node -v)" }
       $nodeExe = (Get-Command node).Source; $npxCli = Join-Path (Split-Path $nodeExe) 'node_modules\npm\bin\npx-cli.js'
-      Start-Process -FilePath $nodeExe -ArgumentList (@("`"$npxCli`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
-      for ($i = 0; $i -lt 180 -and -not (& $up); $i++) { Start-Sleep 2 } # the first time: npm fetches it and its database is made
+      # stdin from an empty file: a prompt then ends at once instead of waiting on a hidden window nobody sees
+      $empty = Join-Path $HOME '.jauvex\empty.txt'; Set-Content -Path $empty -Value $null
+      $pc = Start-Process -FilePath $nodeExe -ArgumentList (@("`"$npxCli`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardInput $empty -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru
+      $clock = [Diagnostics.Stopwatch]::StartNew() # the first time: npm fetches it and its database is made
+      while ($clock.Elapsed.TotalMinutes -lt 6 -and -not $pc.HasExited -and -not (& $up)) { Start-Sleep 2 }
     }
     if (& $up) {
       $st = node (Join-Path $dir 'scripts\paperclip.ts') status | ConvertFrom-Json
       if (-not $st.connected) { node (Join-Path $dir 'scripts\paperclip.ts') connect; if ($LASTEXITCODE -eq 2) { node (Join-Path $dir 'scripts\paperclip.ts') connect --company 'Jauvex' } } # a fresh Paperclip has no company yet
       Say 'Paperclip is running: http://127.0.0.1:3100 (the Paperclip item in the sidebar)'
-    } else { Write-Host "Paperclip did not come up in 6 minutes; the end of its log ($HOME\.jauvex\paperclip.log):" -ForegroundColor Yellow; Get-Content "$HOME\.jauvex\paperclip.log", "$HOME\.jauvex\paperclip.log.err" -Tail 25 -ErrorAction SilentlyContinue }
+    } else {
+      Write-Host "Paperclip did not come up$(if ($pc -and $pc.HasExited) { " (it ended, code $($pc.ExitCode))" } else { ' in 6 minutes' }); the end of its log ($HOME\.jauvex\paperclip.log):" -ForegroundColor Yellow
+      Get-Content "$HOME\.jauvex\paperclip.log", "$HOME\.jauvex\paperclip.log.err" -Tail 25 -ErrorAction SilentlyContinue
+      # what it is doing: its processes (npm still installing, or the server and its database) and Paperclip's own logs
+      if ($pc -and -not $pc.HasExited) { Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|cmd|postgres|initdb|pg_ctl)\.exe$' } | ForEach-Object { Write-Host "  $($_.ProcessId) <- $($_.ParentProcessId): $("$($_.CommandLine)".Substring(0, [Math]::Min(200, "$($_.CommandLine)".Length)))" } }
+      Get-ChildItem (Join-Path $HOME '.paperclip\instances\default\logs') -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.FullName)"; Get-Content $_.FullName -Tail 15 }
+    }
   } catch { Write-Host "Paperclip is not ready ($($_.Exception.Message)); the app runs without it meanwhile." -ForegroundColor Yellow }
 }
 
