@@ -39,7 +39,7 @@ jobs:
           $env:Path = "$env:ProgramFiles\nodejs;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
           $env:JAUVEX_DIR = Join-Path $env:RUNNER_TEMP 'jauvex'; Set-Location $env:JAUVEX_DIR; node -v
           $data = Join-Path $env:RUNNER_TEMP 'jxdata'; New-Item -ItemType Directory -Force $data | Out-Null
-          $env:CVC_DATA_DIR = $data; $env:CVC_JAUVEX_HOME = Join-Path $data 'home'; $env:CVC_WEB_OPEN = '0'; $env:CVC_WEB_TOKEN = 'ci-token'; $env:CVC_WEB_PORT = '4343'
+          $env:CVC_DATA_DIR = $data; $env:CVC_WEB_OPEN = '0'; $env:CVC_WEB_TOKEN = 'ci-token'; $env:CVC_WEB_PORT = '4343'
           $log = Join-Path $env:RUNNER_TEMP 'web.log'
           $p = Start-Process npm.cmd -ArgumentList 'run', 'web' -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -NoNewWindow
           $fails = 0; function Check($name, $ok, $got) { if ($ok) { Write-Host "PASS $name" } else { Write-Host "FAIL $name $got" -ForegroundColor Red; $script:fails++ } }
@@ -50,7 +50,7 @@ jobs:
             $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:4343/' -TimeoutSec 30
             Check 'the page is served' ($page.StatusCode -eq 200 -and $page.Content -match '<div id="root">') $page.StatusCode
             $st = Rpc 'api' @('state'); Check 'the backend answers' ($st.ok) ($st | ConvertTo-Json -Depth 3 -Compress)
-            # the app's own agent: its folder is made and it is in the state (the sidebar's Jauvex row)
+            # the app's own agent, in <home>\.jauvex as on a user's machine (no CVC_JAUVEX_HOME): its folder is made and it is in the state (the sidebar's Jauvex row)
             $jx = Rpc 'api' @('jauvexProject'); Write-Host "jauvexProject: $($jx | ConvertTo-Json -Depth 4 -Compress)"
             Check 'the Jauvex agent is there' ($jx.ok -and $jx.value.builtin -eq 'jauvex') "$($jx.error)"
             $st2 = (Rpc 'api' @('state')).value; Check '... and stays in the state' (@($st2.projects | Where-Object { $_.builtin -eq 'jauvex' }).Count -eq 1) ($st2 | ConvertTo-Json -Depth 4 -Compress)

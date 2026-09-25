@@ -178,7 +178,7 @@ export default function App() {
     await refresh();
     if (restored.current) return; restored.current = true;
     try { const s = await api.state(); const u = s.ui; if (u?.sidebar === false) setSidebar(false); if (u?.showMeta) setShowMeta(true); setAutoCompact(autoCompactPct(u)); if (!u?.welcomed) setWelcomeOpen(true); setWelcomeNext(!u?.welcomed); setJauvexSession(u?.jauvexSession ?? null); setJauvexProvider(u?.jauvexProvider ?? null); setJauvexMove(u?.jauvexMove ?? 'unified'); setShowJauvex(u?.showJauvex !== false); setOpencut(u?.opencut ?? {}); if (u?.defaultProvider) { setDefaultProvider(u.defaultProvider); localStorage.setItem('cvc.provider', u.defaultProvider); }
-      void api.jauvexProject().then((j) => { setJauvex(j); setProjects((ps) => (ps.some((x) => x.id === j.id) ? ps : [...ps, j])); }).catch(() => {}); // the first time it is created after the state was loaded: the chat needs it in the list
+      void api.jauvexProject().then((j) => { setJauvex(j); setProjects((ps) => (ps.some((x) => x.id === j.id) ? ps : [...ps, j])); }).catch((e: Error) => setError(`The Jauvex agent could not be set up: ${e.message}`)); /* said, not swallowed: on a Windows machine its row was simply missing, with no word why */ // the first time it is created after the state was loaded: the chat needs it in the list
       const p = u?.sel && s.projects.find((x) => x.id === u.sel!.projectId);
       // Turns still running in the main process (the window was reloaded, not the app): their sessions are mounted with the running
       // chat's id, so the events of that turn land here. Decided before anything is mounted: a chat takes its id at mount and never after.
