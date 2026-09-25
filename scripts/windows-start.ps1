@@ -3,7 +3,9 @@
 # or, in a copy already here: double-click start-windows.cmd. What is missing is installed (Node and Git with winget, the app's packages,
 # the voice with npm run voice:setup), what is there is kept, and the app starts (npm run web) and opens the browser. Run it again any time:
 # it only does what is still missing, then starts the app. JAUVEX_DIR moves the copy (default: <home>\jauvex), JAUVEX_BRANCH picks the branch,
-# JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml).
+# JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml), JAUVEX_ZCODE=0 leaves ZCode out.
+# ZCode (github.com/zai-org/ZCode), the third agent, is built from its source into <home>\zcode (Node 24, pnpm) and its zcode command
+# put in <home>\.jauvex\bin, on the user's PATH; it is rebuilt only when its source moved. Its sign-in stays the user's: zcode login zai.
 $ErrorActionPreference = 'Stop'
 $repo = 'https://github.com/happytalkman/code-jauvex'
 $branch = if ($env:JAUVEX_BRANCH) { $env:JAUVEX_BRANCH } else { 'claude/awesome-pasteur-ndvvom' }
@@ -17,13 +19,15 @@ function Winget($id, $what) {
   Refresh-Path
 }
 
-# Node 22.18 or newer: the app's scripts are TypeScript that Node runs as it is.
-function Node-Ok { if (-not (Has 'node')) { return $false }; try { [version]((node -v).TrimStart('v')) -ge [version]'22.18.0' } catch { $false } }
+# Node 22.18 or newer: the app's scripts are TypeScript that Node runs as it is. ZCode needs 24.
+$withZcode = $env:JAUVEX_ZCODE -ne '0'
+$nodeMin = if ($withZcode) { [version]'24.0.0' } else { [version]'22.18.0' }
+function Node-Ok { if (-not (Has 'node')) { return $false }; try { [version]((node -v).TrimStart('v')) -ge $nodeMin } catch { $false } }
 if (-not (Node-Ok)) {
-  if (Has 'node') { Write-Host "Node $(node -v) is too old: the app needs 22.18 or newer." -ForegroundColor Yellow }
+  if (Has 'node') { Write-Host "Node $(node -v) is too old: this needs $nodeMin or newer." -ForegroundColor Yellow }
   Winget 'OpenJS.NodeJS.LTS' 'Node.js'
   if (-not (Node-Ok)) { $env:Path = "$env:ProgramFiles\nodejs;$env:Path" } # an older Node earlier on the PATH still answers first
-  if (-not (Node-Ok)) { Fail 'Node.js 22.18 or newer is not reachable yet: close this window, open a new PowerShell, run the same command again. (An older Node from nvm or another installer may come first on the PATH.)' }
+  if (-not (Node-Ok)) { Fail "Node.js $nodeMin or newer is not reachable yet: close this window, open a new PowerShell, run the same command again. (An older Node from nvm or another installer may come first on the PATH.)" }
 }
 if (-not (Has 'git')) { Winget 'Git.Git' 'Git'; if (-not (Has 'git')) { Fail 'Git was installed but this window does not see it yet: close it, open a new PowerShell, run the same command again.' } }
 
@@ -39,9 +43,35 @@ Say 'Installing the app''s packages'; npm.cmd install; if ($LASTEXITCODE) { Fail
 Say 'The voice: whisper-server and the Whisper models (about 250 MB the first time)'
 npm.cmd run voice:setup; if ($LASTEXITCODE) { Write-Host 'The voice is not ready (see above); the app runs by text meanwhile. Run this again later to finish it.' -ForegroundColor Yellow }
 
+# ZCode: its CLI built from its source (about 3 minutes the first time), the zcode command made for it. A failure here leaves the app
+# running without ZCode, and says why.
+if ($withZcode) {
+  $zc = Join-Path $HOME 'zcode'; $bin = Join-Path $HOME '.jauvex\bin'; $cli = Join-Path $zc 'apps\zcode-cli\packages\cli\dist\zcode.cjs'
+  try {
+    if (-not (Test-Path (Join-Path $zc 'package.json'))) { Say "Getting ZCode into $zc"; git clone --depth 1 https://github.com/zai-org/ZCode $zc; if ($LASTEXITCODE) { throw 'git clone of ZCode failed' } }
+    else { Say 'Bringing ZCode up to date'; git -C $zc pull --ff-only; if ($LASTEXITCODE) { Write-Host 'Could not update ZCode: building the copy as it is.' -ForegroundColor Yellow } }
+    $head = (git -C $zc rev-parse HEAD).Trim(); $stamp = Join-Path $zc '.jauvex-built'
+    if (-not (Test-Path $cli) -or -not (Test-Path $stamp) -or (Get-Content $stamp -Raw).Trim() -ne $head) {
+      Say 'Building ZCode (its CLI only; a few minutes the first time)'
+      Push-Location $zc
+      try { # pnpm at ZCode's own version, through npx: corepack enable needs an administrator on Windows
+        npx.cmd --yes pnpm@10.33.2 install --frozen-lockfile --filter '@zcode/cli...'; if ($LASTEXITCODE) { throw 'pnpm install failed' }
+        npx.cmd --yes pnpm@10.33.2 --filter '@zcode/cli...' build; if ($LASTEXITCODE) { throw 'the build failed' }
+      } finally { Pop-Location }
+      Set-Content -Path $stamp -Value $head -Encoding ascii
+    } else { Say 'ZCode is built and up to date' }
+    New-Item -ItemType Directory -Force $bin | Out-Null
+    Set-Content -Path (Join-Path $bin 'zcode.cmd') -Value "@echo off`r`nnode `"$cli`" %*" -Encoding ascii
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); if (-not (($userPath -split ';') -contains $bin)) { [Environment]::SetEnvironmentVariable('Path', "$bin;$userPath", 'User') }
+    if (-not (($env:Path -split ';') -contains $bin)) { $env:Path = "$bin;$env:Path" }
+    Write-Host "zcode: $(zcode.cmd --version)"
+  } catch { Write-Host "ZCode is not ready ($($_.Exception.Message)); the app runs without it meanwhile. Run this again to retry." -ForegroundColor Yellow }
+}
+
 # Claude and Codex themselves come with npm install; their command lines are only for signing in (the app signs no one in).
-$signIn = @{ claude = 'npm install -g @anthropic-ai/claude-code, then: claude auth login'; codex = 'npm install -g @openai/codex, then: codex login'; zcode = 'build it from github.com/zai-org/ZCode (pnpm build:zcode) and put zcode on the PATH' }
+$signIn = @{ claude = 'npm install -g @anthropic-ai/claude-code, then: claude auth login'; codex = 'npm install -g @openai/codex, then: codex login'; zcode = 'run this script again without JAUVEX_ZCODE=0' }
 foreach ($p in $signIn.Keys) { if (-not (Has $p)) { Write-Host "No $p command here. To use its sessions: $($signIn[$p])" -ForegroundColor Yellow } }
+if (Has 'zcode') { Write-Host 'ZCode needs a model to run on: sign in once, in a new PowerShell, with  zcode login zai  (or open  zcode  and add a provider with an API key).' -ForegroundColor Yellow }
 if ($env:JAUVEX_NO_START -eq '1') { Say "Ready in $dir (not started: JAUVEX_NO_START)"; return }
 Say 'Starting the app: the browser opens on it. Ctrl+C here stops it.'
 npm.cmd run web

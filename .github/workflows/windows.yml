@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['as-it-comes', '22']
+        node: ['as-it-comes', '22', '24']  # 22: the install moves it to 24 for ZCode
     runs-on: windows-latest
     timeout-minutes: 40
     env:
@@ -36,7 +36,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           # the Node the install chose (it may have put one first on the PATH)
-          $env:Path = "$env:ProgramFiles\nodejs;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          if (-not ((node -v) -match '^v(2[4-9]|[3-9]\d)\.')) { $env:Path = "$env:ProgramFiles\nodejs;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path }
+          $env:Path = (Join-Path $HOME '.jauvex\bin') + ";$env:Path"  # the zcode command the install made (on the user's PATH, which a step does not reread)
           $env:JAUVEX_DIR = Join-Path $env:RUNNER_TEMP 'jauvex'; Set-Location $env:JAUVEX_DIR; node -v
           $data = Join-Path $env:RUNNER_TEMP 'jxdata'; New-Item -ItemType Directory -Force $data | Out-Null
           $env:CVC_DATA_DIR = $data; $env:CVC_WEB_OPEN = '0'; $env:CVC_WEB_TOKEN = 'ci-token'; $env:CVC_WEB_PORT = '4343'
@@ -55,6 +56,10 @@ jobs:
             Check 'the Jauvex agent is there' ($jx.ok -and $jx.value.builtin -eq 'jauvex') "$($jx.error)"
             $st2 = (Rpc 'api' @('state')).value; Check '... and stays in the state' (@($st2.projects | Where-Object { $_.builtin -eq 'jauvex' }).Count -eq 1) ($st2 | ConvertTo-Json -Depth 4 -Compress)
             $ss = Rpc 'api' @('sessions', $jx.value.id); Check '... and its sessions can be listed' ($ss.ok) "$($ss.error)"
+            # ZCode, built by the install: the app finds its command and its server answers; no sign-in here, so it asks for one
+            $zs = (Rpc 'account:status' @('zcode')).value; Write-Host "zcode: $($zs | ConvertTo-Json -Compress)"
+            Check 'ZCode: the app finds the zcode command' ($zs.method -match '^ZCode CLI') "$($zs.method) $($zs.error)"
+            Check '... its server answers, and it asks for a sign-in' ($zs.error -match 'no model to run on') "$($zs.error)"
             $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
             Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''
             Check 'setup: whisper-server is found' ($sc.whisperBinary) ''
@@ -75,34 +80,3 @@ jobs:
             Write-Host '--- server log'; Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 40
           }
           if ($fails) { throw "$fails FAILED" } else { Write-Host 'ALL PASS' }
-  zcode:
-    # ZCode (github.com/zai-org/ZCode) on Windows: its CLI built from source (Node 24, pnpm), then `zcode app-server` answering the
-    # ZCode Protocol, as the app starts it.
-    runs-on: windows-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/setup-node@v4
-        with: { node-version: '24' }
-      - name: Build the ZCode CLI
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          corepack enable; corepack prepare pnpm@10.33.2 --activate; pnpm -v
-          $zc = Join-Path $env:RUNNER_TEMP 'zcode'; git clone --depth 1 https://github.com/zai-org/ZCode $zc; Set-Location $zc
-          pnpm install --frozen-lockfile --filter "@zcode/cli..."; if ($LASTEXITCODE) { throw 'pnpm install failed' }
-          pnpm --filter "@zcode/cli..." build; if ($LASTEXITCODE) { throw 'build failed' }
-          $cli = Join-Path $zc 'apps\zcode-cli\packages\cli\dist\zcode.cjs'; node $cli --version; if ($LASTEXITCODE) { throw 'zcode --version failed' }
-          Get-ChildItem (Split-Path $cli) | Select-Object -First 20 Name, Length
-      - name: zcode app-server answers
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $cli = Join-Path $env:RUNNER_TEMP 'zcode\apps\zcode-cli\packages\cli\dist\zcode.cjs'
-          $psi = New-Object System.Diagnostics.ProcessStartInfo 'node', "`"$cli`" app-server"; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.UseShellExecute = $false
-          $p = [System.Diagnostics.Process]::Start($psi)
-          # no initialize: the server prints its startup notifications, then takes requests (electron/zcode.ts)
-          $p.StandardInput.WriteLine('{"id":1,"method":"session/list","params":{}}'); $p.StandardInput.Flush()
-          $ok = $false; $deadline = (Get-Date).AddSeconds(90)
-          while ((Get-Date) -lt $deadline) { $t = $p.StandardOutput.ReadLineAsync(); if (-not $t.Wait(30000) -or $null -eq $t.Result) { break }; $line = $t.Result; Write-Host "< $($line.Substring(0, [Math]::Min(300, $line.Length)))"; if ($line -match '"id":1\b') { $ok = $true; break } }
-          if (-not $ok) { Write-Host 'FAIL no answer to session/list' }
-          $p.Kill(); Write-Host '--- stderr'; $p.StandardError.ReadToEnd() | Select-Object -Last 20; if (-not $ok) { throw 'zcode app-server did not answer' }

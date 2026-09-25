@@ -38,6 +38,19 @@ npm run voice:setup   # once, for the voice: whisper-server and the two Whisper 
 npm run web
 ```
 
+Or all of it, ZCode included, in one command in PowerShell (`scripts/windows-start.ps1`; later, `start-windows.cmd` in the app's folder):
+
+```
+irm https://raw.githubusercontent.com/happytalkman/code-jauvex/claude/awesome-pasteur-ndvvom/scripts/windows-start.ps1 | iex
+```
+
+It installs what is missing (Node and Git with winget), gets the app into `<home>\jauvex`, installs it, sets up the voice, and builds
+ZCode's CLI from its source into `<home>\zcode` (Node 24 and pnpm, through npx: `corepack enable` needs an administrator on Windows),
+with a `zcode` command in `<home>\.jauvex\bin` added to the user's PATH; ZCode is rebuilt only when its source moved, and
+`JAUVEX_ZCODE=0` leaves it out. What stays the user's: signing in (`zcode login zai`, `claude auth login`, `codex login`).
+`.github/workflows/windows.yml` runs that command on a clean Windows runner on every change to it: the install, then the app driven over
+its API (the page, the Jauvex agent, ZCode found and asking for a sign-in, Windows' speech, whisper-server hearing it).
+
 `npm run web` builds the window, starts a small local server (`electron/web.ts`, no Electron) and opens the browser on the link it
 prints, `http://127.0.0.1:4343/?token=...`. Stop it with Ctrl+C; start it again the same way. Sign in to the agents with their own
 command lines first, as on a Mac (`claude auth login`, `codex login`; ZCode's `zcode` on the PATH). A folder is added by typing its
