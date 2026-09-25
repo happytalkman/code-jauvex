@@ -56,6 +56,11 @@ const cm = await cli('POST', '/api/issues/i1/comments', '{"body":"done: the page
 check('a comment outside a Paperclip run: again as the board, marked as this app\'s, and said so', cm.code === 0 && /"body":"\[from Jauvex\] done: the page is up"/.test(cm.out) && /went as the board/.test(cm.err) && seen.at(-1)!.auth === undefined, cm.out + cm.err);
 const up = await cli('PATCH', '/api/issues/i1', '{"status":"in_progress"}');
 check('... and a status change (401 "Agent run id required")', up.code === 0 && /"status":"in_progress"/.test(up.out), up.out + up.err);
+const { jsonArg, QUOTES_LOST } = await import('../shared/cli-json.ts');
+const lost = jsonArg('{title:Windows check}'); const piped = jsonArg('-', () => '{"title":"x"}');
+check('a JSON argument that lost its quotes (Windows PowerShell) is said as such; piped in with -, it is read', !lost.ok && lost.error === QUOTES_LOST && piped.ok && (piped.value as { title: string }).title === 'x' && !jsonArg('nope').ok && (jsonArg('nope') as { error: string }).error === 'not JSON');
+const viaStdin = await new Promise<{ code: number; out: string }>((resolve) => { const c = execFile(process.execPath, ['scripts/paperclip.ts', 'POST', '/api/issues/i1/comments', '-'], { env: { ...process.env, PAPERCLIP_URL: 'http://127.0.0.1:4493', PAPERCLIP_API_KEY: '' } }, (e, out) => resolve({ code: e ? 1 : 0, out })); c.stdin!.end('{"body":"piped"}'); });
+check('... the command line takes it piped in', viaStdin.code === 0 && /"body":"\[from Jauvex\] piped"/.test(viaStdin.out), viaStdin.out);
 const { asBoard, needsRun } = await import('../shared/paperclip.ts');
 check('the marking is added once, only to the text fields', JSON.stringify(asBoard({ body: '[from Jauvex] x', status: 'done' })) === '{"body":"[from Jauvex] x","status":"done"}' && needsRun(403, 'need a run') && !needsRun(403, 'not allowed') && !needsRun(500, 'need a run'));
 const { mcpServer } = await import('../electron/paperclip.ts'); const server = await mcpServer();

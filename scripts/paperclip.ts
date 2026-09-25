@@ -3,11 +3,12 @@
 //   node scripts/paperclip.ts connect [--company "<name or id>"]  once: this app joins that company as an agent named Jauvex, and keeps
 //                                                                  the API key Paperclip gives it (<home>/.jauvex/paperclip/api-key, owner-only)
 //   node scripts/paperclip.ts GET /api/companies/<id>/issues       any call of its REST API (paths under /api, JSON bodies)
-//   node scripts/paperclip.ts POST /api/companies/<id>/issues '{"title":"..."}'
+//   node scripts/paperclip.ts POST /api/companies/<id>/issues '{"title":"..."}'   (or the JSON piped in, and - : Windows PowerShell drops quotes)
 // The key is sent, never printed. PAPERCLIP_URL moves Paperclip off http://127.0.0.1:3100 (and is saved by connect).
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { jsonArg } from '../shared/cli-json.ts';
 import { asBoard, needsRun, paperclipAnswer, paperclipConfig, paperclipRequest, type PaperclipConfig } from '../shared/paperclip.ts';
 
 const home = process.env.CVC_JAUVEX_HOME || path.join(os.homedir(), '.jauvex'); const data = process.env.CVC_DATA_DIR || path.join(home, 'personal');
@@ -47,7 +48,7 @@ try {
     console.log(JSON.stringify({ ok: true, company: company.name, companyId: company.id, agent: agent.name, agentId: agent.id }));
   } else if (cmd && /^(GET|POST|PATCH|PUT|DELETE)$/i.test(cmd) && rest[0]) {
     try { paperclipRequest(cfg, cmd, rest[0]); } catch (e) { console.error((e as Error).message); process.exit(2); } // refused before anything is sent, and said as such
-    let body: unknown; if (rest[1] !== undefined) { try { body = JSON.parse(rest[1]); } catch { console.error('the body is a JSON value'); process.exit(2); } }
+    let body: unknown; if (rest[1] !== undefined) { const j = jsonArg(rest[1]); if (!j.ok) { console.error(`the body is a JSON value: ${j.error}`); process.exit(2); } body = j.value; } // '-': from stdin
     const target = rest[0].replaceAll('{companyId}', cfg.companyId);
     let r = await call(cmd, target, body).catch(down); let note = '';
     if (needsRun(r.status, r.text)) { // a comment or an update outside a Paperclip run: again as the board, in trusted local mode only

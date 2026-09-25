@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { jsonArg } from '../shared/cli-json.ts';
 import { graphAnswer, graphConfig, graphRequest, newId, type GraphConfig } from '../shared/graph.ts';
 
 const home = process.env.CVC_JAUVEX_HOME || path.join(os.homedir(), '.jauvex'); const data = process.env.CVC_DATA_DIR || path.join(home, 'personal'); // as electron/paths.ts
@@ -20,7 +21,7 @@ if (q === 'status') {
   try { const r = await fetch(`${cfg.admin}/readyz`, { signal: AbortSignal.timeout(3000) }); console.log(JSON.stringify({ ok: r.ok, url: cfg.url, ready: r.ok })); process.exit(r.ok ? 0 : 1); }
   catch { console.log(JSON.stringify({ ok: false, url: cfg.url, ready: false, error: 'WEAIDdb does not answer: is it running? On Windows: powershell -File scripts/weaiddb.ps1 start' })); process.exit(1); }
 }
-let parameters: Record<string, unknown> | undefined; if (params !== undefined) { try { parameters = JSON.parse(params) as Record<string, unknown>; } catch { console.error('--params takes a JSON object'); process.exit(2); } }
+let parameters: Record<string, unknown> | undefined; if (params !== undefined) { const j = jsonArg(params); if (!j.ok || !j.value || typeof j.value !== 'object' || Array.isArray(j.value)) { console.error(`--params takes a JSON object${j.ok ? '' : `: ${j.error}`}`); process.exit(2); } parameters = j.value as Record<string, unknown>; } // '-': from stdin
 let token: string; try { token = readFileSync(cfg.tokenFile, 'utf8').trim(); } catch { console.error(`WEAIDdb is not set up here: no token file at ${cfg.tokenFile}.`); process.exit(1); }
 try { const req = graphRequest(cfg, token, q, parameters); const r = await fetch(req.url, { ...req.init, signal: AbortSignal.timeout(40_000) }); const a = graphAnswer(r.status, await r.text()); console.log(a.text); process.exit(a.ok ? 0 : 1); }
 catch (e) { console.error(`WEAIDdb does not answer at ${cfg.url} (${(e as Error).message}).`); process.exit(1); }

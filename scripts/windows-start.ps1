@@ -130,13 +130,13 @@ if ($withPaperclip) {
       $log = Join-Path $HOME '.jauvex\paperclip.log'; New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
       $pcArgs = if ($first) { @('-y', 'paperclipai@latest', 'onboard', '--yes', '--no-install-service') } else { @('-y', 'paperclipai@latest', 'run') }
       Start-Process -FilePath 'npx.cmd' -ArgumentList $pcArgs -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
-      for ($i = 0; $i -lt 90 -and -not (& $up); $i++) { Start-Sleep 2 }
+      for ($i = 0; $i -lt 180 -and -not (& $up); $i++) { Start-Sleep 2 } # the first time: npm fetches it and its database is made
     }
     if (& $up) {
       $st = node (Join-Path $dir 'scripts\paperclip.ts') status | ConvertFrom-Json
       if (-not $st.connected) { node (Join-Path $dir 'scripts\paperclip.ts') connect; if ($LASTEXITCODE -eq 2) { node (Join-Path $dir 'scripts\paperclip.ts') connect --company 'Jauvex' } } # a fresh Paperclip has no company yet
       Say 'Paperclip is running: http://127.0.0.1:3100 (the Paperclip item in the sidebar)'
-    } else { Write-Host "Paperclip did not come up; its log: $HOME\.jauvex\paperclip.log" -ForegroundColor Yellow }
+    } else { Write-Host "Paperclip did not come up in 6 minutes; the end of its log ($HOME\.jauvex\paperclip.log):" -ForegroundColor Yellow; Get-Content "$HOME\.jauvex\paperclip.log", "$HOME\.jauvex\paperclip.log.err" -Tail 25 -ErrorAction SilentlyContinue }
   } catch { Write-Host "Paperclip is not ready ($($_.Exception.Message)); the app runs without it meanwhile." -ForegroundColor Yellow }
 }
 
