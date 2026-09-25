@@ -239,6 +239,15 @@ export async function transcribe(wav: ArrayBuffer, language: string, quiet = fal
 
 // ---------- mouth
 const renders = new Set<ChildProcess>();
+/** A speech render's exit code, or null when it failed to start or took longer than `ms` (then it is killed, on Windows with its tree,
+ * by pid): Windows' speech once hung a render for minutes on a fresh machine (2026-09-25, the Windows check), and the voice with it. */
+export const RENDER_MS = 30_000;
+export function renderExit(child: ChildProcess, ms = RENDER_MS): Promise<number | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }); else child.kill('SIGKILL'); resolve(null); }, ms);
+    child.on('exit', (c) => { clearTimeout(timer); resolve(c); }); child.on('error', () => { clearTimeout(timer); resolve(null); });
+  });
+}
 let cachedVoices: string[] | null = null;
 export async function voices(): Promise<string[]> {
   if (cachedVoices) return cachedVoices;
@@ -258,7 +267,7 @@ function speakWindows(clean: string, file: string, voice: string, rate: number):
   const script = `[Console]::InputEncoding = [Text.Encoding]::UTF8; Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Rate = ${sapiRate(rate)}; if ($env:JAUVEX_VOICE) { try { $s.SelectVoice($env:JAUVEX_VOICE) } catch {} }; $f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono); $s.SetOutputToWaveFile('${file}', $f); $s.Speak([Console]::In.ReadToEnd()); $s.Dispose()`;
   const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true, env: { ...process.env, JAUVEX_VOICE: voice.split('|')[0] ?? '' } });
   renders.add(child); child.stdin?.on('error', () => {}); child.stdin?.end(clean, 'utf8');
-  return new Promise<number | null>((resolve) => { child.on('exit', (c) => { renders.delete(child); resolve(c); }); child.on('error', () => { renders.delete(child); resolve(1); }); });
+  return renderExit(child).finally(() => renders.delete(child));
 }
 /** Render one chunk of text to 22.05 kHz mono WAV with `say` (Windows: its own speech). Killed immediately by cancelSpeech(). */
 export async function speak(text: string, voice: string, rate: number): Promise<ArrayBuffer | null> {
@@ -266,7 +275,7 @@ export async function speak(text: string, voice: string, rate: number): Promise<
   const file = path.join(os.tmpdir(), `cvc-say-${randomUUID()}.wav`);
   if (WIN) { try { if ((await speakWindows(clean, file, voice, rate)) !== 0) return null; const buf = await fs.readFile(file); return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer; } catch { return null; } finally { void fs.rm(file, { force: true }); } }
   const args = ['-o', file, '--file-format=WAVE', '--data-format=LEI16@22050', '-r', String(Math.round(rate))];
-  const render = async (v: string): Promise<number | null> => { const child = spawn('say', [...args, ...(v ? ['-v', v] : []), '--', clean], { stdio: 'ignore' }); renders.add(child); const c = await new Promise<number | null>((resolve) => { child.on('exit', resolve); child.on('error', () => resolve(1)); }); renders.delete(child); return c; };
+  const render = async (v: string): Promise<number | null> => { const child = spawn('say', [...args, ...(v ? ['-v', v] : []), '--', clean], { stdio: 'ignore' }); renders.add(child); const c = await renderExit(child); renders.delete(child); return c; };
   // No voice picked means the system's default voice (slower to render than the classic voices, but it is the one that sounds right).
   let code = await render(voice); if (code !== 0 && voice) code = await render(''); // a voice that is not on this Mac: the system's default instead
   try { if (code !== 0) return null; const buf = await fs.readFile(file); return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer; }
