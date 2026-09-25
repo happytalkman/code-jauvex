@@ -124,6 +124,10 @@ settings after) checks each of them and tells you what is missing.
    (`pnpm build:zcode`) and put its `zcode` on the PATH, then give it a model: `zcode login` for its own account, or a provider
    with an API key in its settings (here ZCode runs on API-key providers only, see "How it is built"). The welcome screen and the
    accounts panel count it as ready once the command answers and a new ZCode session would have a model to run on.
+3b. **Claw, optional**: a fourth provider, [claw-code](https://github.com/ultraworkers/claw-code) (MIT, a Rust agent harness on the
+   Anthropic API). Build it (`cargo build --release` in its `rust/`) and put its `claw` on the PATH; on Windows the setup script gets
+   a prebuilt `claw.exe` (below). It runs on an Anthropic API key, not a subscription: `ANTHROPIC_API_KEY` in the environment
+   (Windows: `setx ANTHROPIC_API_KEY sk-ant-...`, then start the app again). Ready once `claw --version` answers and its `doctor` sees the key.
 4. **whisper.cpp for the ears**: `npm start` installs it with Homebrew if it is missing and downloads the two models into
    `models/` (git-ignored): `ggml-small-q5_1.bin` for the transcript and `ggml-base-q5_1.bin` for the live words while you
    speak. Each is checked against the size and SHA-256 Hugging Face lists for it (`scripts/models.sh`): a download goes to a
@@ -623,6 +627,22 @@ Press the white round button in the message box. All local except the two Claude
   `scripts/jauvex.ts` takes `--provider zcode` and refuses a provider it does not know. The checks never meet a real `zcode` on the PATH
   (`tests/run.sh` points `CVC_ZCODE_BIN` nowhere unless a check names the stand-in). Checked in `tests/zcode-provider.test.ts`,
   `tests/orders.test.ts` and `tests/welcome-intent.test.ts`.
+- Claw sessions (a fourth provider) run the **`claw` CLI** (`electron/claw.ts`; [claw-code](https://github.com/ultraworkers/claw-code),
+  MIT, read at 08106b0). claw has no server mode (no JSON-RPC; its `acp serve` only reports status) and its one-shot mode, the prompt on
+  stdin with `--output-format json`, starts a new claw session every run: `--resume` takes slash commands only and its interactive mode
+  needs a terminal. So a Claw session is the app's own: `data/claw/<id>.json` keeps its turns (the user's words, claw's answer, the tools
+  it ran with their results, tokens and claw's cost estimate), and every turn runs one claw in the session's folder with the app's
+  briefing and the conversation so far in front of the new message (`clawPrompt`: the newest turns up to about 60,000 characters, saying
+  how many older ones were left out). The files the agent changed are on disk as it left them; what it read in earlier turns comes back
+  only as those turns' summary. What that means: the answer lands whole when claw ends, with each tool call and its result; a message
+  sent during a turn waits for the next one (no steering); permissions are claw's modes, set per turn and never asked (ask:
+  `workspace-write`, edits inside the folder; auto: `danger-full-access`, commands too); the model is one of claw's aliases, Sonnet unless
+  another is chosen (claw's own default is Opus); images are not seen (claw takes text) and the window says so; there is nothing to
+  compact. Readiness is `claw --version` and claw's own `doctor` (its auth check reads that a key is there, never the key). The usage
+  panel shows the turns' tokens and cost from that record. The voice of a Claw session asks claw read-only, on Haiku unless another alias
+  is picked, one claw per question (slower to start than the other providers' voices). The stand-in is `tests/mock/claw` (`CVC_CLAW_BIN`);
+  `tests/claw-provider.test.ts` also runs the real binary when given one and claw's own `mock-anthropic-service` (`CVC_CLAW_REAL`,
+  `CVC_CLAW_MOCK_API`), which answers without a key.
 - `electron/chat.ts` routes each turn by the session's provider; every provider sends the UI the same `ChatEvent`s.
 - Two threads per chat. The main thread is the session itself (Claude or Codex, the model in the picker). The voice
   thread is a small model **from the same provider** (Haiku for Claude sessions; for Codex sessions the account's fast,

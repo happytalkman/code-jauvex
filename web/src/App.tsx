@@ -13,7 +13,7 @@ import { Pane, type PaneTarget } from './Pane';
 import { findAgents, shortIds, shortTitle } from '../../shared/roster';
 import { answerIs, stopSaysMore } from '../../shared/orders';
 import { opencutAddress, opencutUrl } from '../../shared/opencut';
-import { DICTATED_TAG, JAUVEX_HELLO, SIGN_IN_IN_APP, type AgentRequestEvent, type JauvexEntry, type UiState, type AgentCommand, type AgentResult, type Attachment, PROVIDERS, PROVIDER_LABEL, VOICE_DEFAULTS, kickoffMessage, type CommandDetails, providerOf, type VoiceCommand, type AppCommand, type Block, type BusyTriage, type DebugEvent, type ChatEvent, type ChatMessage, type ModelOption, type PermissionDecision, type Project, type Permissions, type Provider, type SessionInfo, type SessionPrefs, type VoiceSettings, type VoiceStatus } from '../../shared/types';
+import { DICTATED_TAG, JAUVEX_HELLO, SIGN_IN_IN_APP, type AgentRequestEvent, type JauvexEntry, type UiState, type AgentCommand, type AgentResult, type Attachment, CLAW_MODELS, PROVIDERS, PROVIDER_LABEL, VOICE_DEFAULTS, kickoffMessage, type CommandDetails, providerOf, type VoiceCommand, type AppCommand, type Block, type BusyTriage, type DebugEvent, type ChatEvent, type ChatMessage, type ModelOption, type PermissionDecision, type Project, type Permissions, type Provider, type SessionInfo, type SessionPrefs, type VoiceSettings, type VoiceStatus } from '../../shared/types';
 import { ago, api, pickFolder, size } from './api';
 import { VoiceEngine, clean, type VoicePhase } from './voice';
 import { Orb } from './Orb';
@@ -57,7 +57,7 @@ export default function App() {
   const [autoCompact, setAutoCompact] = useState(AUTO_COMPACT_DEFAULT); // compact an agent's conversation when its context is this full (T-74); every open chat is told
   const changeAutoCompact = (pct: number) => { setAutoCompact(pct); void api.setUi({ autoCompact: pct }); window.dispatchEvent(new CustomEvent('cvc-auto-compact', { detail: pct })); };
   // Who is signed in: only a signed-in provider can be chosen for a new session, a move or the default (checked at start and after every sign-in or sign-out).
-  const [signedIn, setSignedIn] = useState<Record<Provider, boolean>>({ claude: true, codex: true, zcode: true });
+  const [signedIn, setSignedIn] = useState<Record<Provider, boolean>>({ claude: true, codex: true, zcode: true, claw: true });
   useEffect(() => { const check = () => void Promise.all(PROVIDERS.map((p) => window.desktop.accountStatus(p).then((st) => [p, st.signedIn] as const).catch(() => [p, true] as const))).then((all) => setSignedIn(Object.fromEntries(all) as Record<Provider, boolean>)); check(); return window.desktop.onAccountEvent((e) => { if (e.type === 'done') setTimeout(check, 500); }); }, []);
   const [jauvex, setJauvex] = useState<Project | null>(null); const [jauvexSession, setJauvexSession] = useState<string | null>(null); const [jauvexProvider, setJauvexProvider] = useState<Provider | null>(null); const [jauvexMove, setJauvexMove] = useState<'unified' | 'handoff'>('unified'); const [showJauvex, setShowJauvex] = useState(true); const [defaultProvider, setDefaultProvider] = useState<Provider | null>(null); // the Jauvex agent (the app's own folder as a project) and the default agent
   const [infos, setInfos] = useState<Record<string, SessionInfo[]>>({});
@@ -454,7 +454,7 @@ function SessionPicker({ project, all, onClose, onSave }: { project: Project; al
   const [who, setWho] = useState<Provider | 'all'>('all'); // whose sessions: the list holds both providers' sessions for the folder
   const [picked, setPicked] = useState<Set<string>>(new Set(project.sessions));
   const [saving, setSaving] = useState(false);
-  const counts = useMemo(() => ({ claude: (all ?? []).filter((s) => s.provider === 'claude').length, codex: (all ?? []).filter((s) => s.provider === 'codex').length, zcode: (all ?? []).filter((s) => s.provider === 'zcode').length }), [all]);
+  const counts = useMemo(() => ({ claude: (all ?? []).filter((s) => s.provider === 'claude').length, codex: (all ?? []).filter((s) => s.provider === 'codex').length, zcode: (all ?? []).filter((s) => s.provider === 'zcode').length, claw: (all ?? []).filter((s) => s.provider === 'claw').length }), [all]);
   const list = useMemo(() => { const n = q.trim().toLowerCase(); return (all ?? []).filter((s) => (who === 'all' || s.provider === who) && (!n || `${s.customTitle ?? ''} ${s.summary} ${s.firstPrompt ?? ''}`.toLowerCase().includes(n))); }, [all, q, who]);
   const toggle = (id: string) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   return (
@@ -462,7 +462,7 @@ function SessionPicker({ project, all, onClose, onSave }: { project: Project; al
       <div className="modal" role="dialog" aria-label="Add sessions">
         <div className="modal-head"><div><h3>Sessions in {project.name}</h3><p>{project.path}</p></div><button className="icon-btn" onClick={onClose}><X size={16} /></button></div>
         <div className="modal-search"><Search size={15} /><input autoFocus placeholder="Search sessions" value={q} onChange={(e) => setQ(e.target.value)} />
-          <span className="who">{([['all', 'All', counts.claude + counts.codex + counts.zcode], ['claude', 'Claude', counts.claude], ['codex', 'Codex', counts.codex], ...(counts.zcode ? [['zcode', 'ZCode', counts.zcode]] as const : [])] as const).map(([k, label, n]) => <button key={k} className={who === k ? 'on' : ''} title={k === 'all' ? 'Sessions of every provider' : `${label} sessions only`} onClick={() => setWho(k)}>{k !== 'all' && <ProviderIcon provider={k} size={11} />}{label}{all ? <em>{n}</em> : null}</button>)}</span></div>
+          <span className="who">{([['all', 'All', counts.claude + counts.codex + counts.zcode + counts.claw], ['claude', 'Claude', counts.claude], ['codex', 'Codex', counts.codex], ...(counts.zcode ? [['zcode', 'ZCode', counts.zcode]] as const : []), ...(counts.claw ? [['claw', 'Claw', counts.claw]] as const : [])] as const).map(([k, label, n]) => <button key={k} className={who === k ? 'on' : ''} title={k === 'all' ? 'Sessions of every provider' : `${label} sessions only`} onClick={() => setWho(k)}>{k !== 'all' && <ProviderIcon provider={k} size={11} />}{label}{all ? <em>{n}</em> : null}</button>)}</span></div>
         <div className="modal-list">
           {!all && <p className="modal-empty">Loading…</p>}
           {all && list.length === 0 && <p className="modal-empty">{q.trim() ? 'No session matches.' : who === 'all' ? 'No provider has sessions for this folder yet.' : `${PROVIDER_LABEL[who]} has no sessions for this folder yet.`}</p>}
@@ -570,7 +570,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
   const [effort, setEffort] = useState(() => kept?.effort ?? localStorage.getItem(effortKey(provider)) ?? '');
   const prefs = useRef({ model, effort, permissions }); prefs.current = { model, effort, permissions };
   const keep = (patch: Partial<SessionPrefs>) => { prefs.current = { ...prefs.current, ...patch }; if (sid.current) void api.setPrefs(project.id, sid.current, prefs.current).catch(() => { /* kept for this window at least */ }); };
-  const efforts = provider === 'codex' ? (codexModels.find((m) => (model ? m.id === model : m.isDefault))?.efforts ?? []) : provider === 'zcode' ? [] : CLAUDE_EFFORTS;
+  const efforts = provider === 'codex' ? (codexModels.find((m) => (model ? m.id === model : m.isDefault))?.efforts ?? []) : provider === 'zcode' || provider === 'claw' ? [] : CLAUDE_EFFORTS;
   const pickProvider = (p: Provider) => { setProvider(p); localStorage.setItem('cvc.provider', p); setModel(localStorage.getItem(modelKey(p)) ?? ''); setEffort(localStorage.getItem(effortKey(p)) ?? ''); };
   const chatId = useRef(adopt ?? crypto.randomUUID()); // a reloaded window takes a running turn back under its old id
   const sid = useRef<string | null>(sessionId);
@@ -597,7 +597,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
   const level = useRef(0);       // what the orb breathes with: your voice while you talk, Claude's while it talks
   const micLevel = useRef(0);
   const v = useRef({ engine: null as VoiceEngine | null, gen: 0, starts: 0 /* speech segments begun, so the end of one never clears hearing once the next has started */, asked: '', answer: '', mainStarted: false, speakTurn: false, chain: Promise.resolve(), spec: null as { id: number; p: Promise<{ text: string; ms: number; dropped?: string }>; ackAudio: Promise<Spoken | null>; busy: boolean; triage: Promise<BusyTriage | null> | null } | null, running: !!adopt, stopped: false, speakerOff: false, hearing: false, wording: false, lastHeard: 0, pendingSummary: null as { words: Promise<string> } | null, playing: null as { id: number; label: string; text: string; at: number; ms: number } | null, playId: 0, bridges: new Map<string, ArrayBuffer | null>(), cfg: VOICE_DEFAULTS });
-  v.current.cfg = cfg; speaker.current = { provider, model: provider === 'codex' ? cfg.codexAckModel : provider === 'zcode' ? cfg.zcodeAckModel ?? '' : cfg.ackModel };
+  v.current.cfg = cfg; speaker.current = { provider, model: provider === 'codex' ? cfg.codexAckModel : provider === 'zcode' ? cfg.zcodeAckModel ?? '' : provider === 'claw' ? cfg.clawAckModel ?? '' : cfg.ackModel };
   useEffect(() => { void api.state().then((st) => { const saved = { ...VOICE_DEFAULTS, ...(st.ui?.voice ?? {}) }; if (/\bClaudex\b/.test(saved.vocabulary)) saved.vocabulary = saved.vocabulary.replace(/\bClaudex\b/g, 'Jauvex'); /* the old name in a saved vocabulary would keep biasing Whisper */ setCfg(saved.voice === 'Samantha' ? { ...saved, voice: '' } : saved); }); }, []);
   const stt = (c: VoiceSettings) => ({ model: c.sttModel, vocabulary: [c.vocabulary, project.name].filter(Boolean).join(', ') }); // the folder's name is a word it should know too
   const applyFromElsewhere = useRef<(next: VoiceSettings) => void>(() => {});
@@ -1002,7 +1002,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
             </div>
           </div>}
       <Composer context={sid.current || ctx ? { usage: ctx, compacting, autoPct, hasSession: !!sid.current, last: lastCompact, onCompact: () => { if (!startCompactRef.current('manual')) setNote(v.current.running ? 'The conversation can be compacted once this turn is over.' : 'Nothing to compact yet: this session has no conversation.'); } } : undefined} draftKey={storeKey} signedIn={signedIn} usageTick={turns} usageModel={model || mainModel.current || ''} jev={jev} running={running} disabled={state !== 'ready'} provider={provider} onProvider={hybrid ? (running ? undefined : switchProvider) : !embed && !sessionId && !sid.current && messages.length === 0 && !running ? pickProvider : undefined}
-        models={provider === 'codex' ? codexModels : provider === 'zcode' ? [] : CLAUDE_MODELS} model={model} onModel={(m) => { setModel(m); localStorage.setItem(modelKey(provider), m); keep({ model: m }); }}
+        models={provider === 'codex' ? codexModels : provider === 'zcode' ? [] : provider === 'claw' ? CLAW_MODELS : CLAUDE_MODELS} model={model} onModel={(m) => { setModel(m); localStorage.setItem(modelKey(provider), m); keep({ model: m }); }}
         permissions={permissions} onPermissions={(p) => { setPermissions(p); localStorage.setItem('cvc.permissions', p); keep({ permissions: p }); }}
         efforts={efforts} effort={effort} onEffort={(e) => { setEffort(e); localStorage.setItem(effortKey(provider), e); keep({ effort: e }); }} onSend={(t, images) => void send(t, false, undefined, false, images)} onStop={() => { hush(); v.current.stopped = true; void window.desktop.chatStop(chatId.current); }}
         voice={{ muteIn, on: voiceOn, phase, status: vstatus, cfg, level, micMuted, speakerOff, toggle: () => void toggleVoice(), toggleMic, toggleSpeaker, hush, save: saveCfg, test: () => { if (v.current.engine) enqueue(say('This is the voice. If you hear this, the speaker is right.'), v.current.gen); } }}
@@ -1088,7 +1088,7 @@ function VoiceSettingsForm({ c, set, st, provider, models, onTest }: { c: VoiceS
           <label><span className="lhead">Mute when idle<em>{idle ? (idle >= 60 ? '1 min' : `${idle} s`) : 'off'}</em></span><input type="range" min={0} max={60} step={5} value={idle} onChange={(e) => set({ idleMuteSec: +e.target.value })} /></label>
           <label className="check"><input type="checkbox" checked={c.showVoiceLines} onChange={(e) => set({ showVoiceLines: e.target.checked })} />Show what the voice says in the thread</label>
           <label className="check"><input type="checkbox" checked={c.ack} onChange={(e) => set({ ack: e.target.checked })} />Acknowledge while thinking</label>
-          <VoiceModelPick provider={provider} value={provider === 'codex' ? c.codexAckModel : provider === 'zcode' ? c.zcodeAckModel ?? '' : c.ackModel} options={provider === 'codex' ? (st?.voiceModels.codex.length ? st.voiceModels.codex : models.map((m) => ({ id: m.id, label: m.label }))) : provider === 'zcode' ? st?.voiceModels.zcode ?? [] : st?.voiceModels.claude ?? []} onChange={(id) => set(provider === 'codex' ? { codexAckModel: id } : provider === 'zcode' ? { zcodeAckModel: id } : { ackModel: id })} />
+          <VoiceModelPick provider={provider} value={provider === 'codex' ? c.codexAckModel : provider === 'zcode' ? c.zcodeAckModel ?? '' : provider === 'claw' ? c.clawAckModel ?? '' : c.ackModel} options={provider === 'codex' ? (st?.voiceModels.codex.length ? st.voiceModels.codex : models.map((m) => ({ id: m.id, label: m.label }))) : provider === 'zcode' ? st?.voiceModels.zcode ?? [] : provider === 'claw' ? st?.voiceModels.claw ?? [] : st?.voiceModels.claude ?? []} onChange={(id) => set(provider === 'codex' ? { codexAckModel: id } : provider === 'zcode' ? { zcodeAckModel: id } : provider === 'claw' ? { clawAckModel: id } : { ackModel: id })} />
   </>;
 }
 /** The main settings' Voice chat section: the same form, on the saved settings, told to every open chat. */

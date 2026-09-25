@@ -9,6 +9,7 @@ import { normalize, projectOr404, saveContext, saveState } from './backend.js';
 import { autoCompactPct, claudeCompactEnv, claudeUsed, tooLong, type ContextUsage } from '../shared/context.js';
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
+import * as claw from './claw.js';
 import { claudeExe } from './account.js';
 
 type Live = { push: (text: string, images?: Attachment[]) => void; q: Query; abort: AbortController; pending: Map<string, (d: PermissionDecision) => void>; always: Set<string>; projectId: string; sessionId: string | null };
@@ -28,6 +29,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   const provider = req.sessionId ? providerOf(project, req.sessionId) : req.provider ?? 'claude';
   if (provider === 'codex') return codex.startChat(req, send);
   if (provider === 'zcode') return zcode.startChat(req, send);
+  if (provider === 'claw') return claw.startChat(req, send);
   const abort = new AbortController();
   // How full the context is (T-74): the last known numbers, then every request's. Claude Code compacts on its own when the setting's share
   // of the window is passed (in the middle of a long turn too); the window compacts between turns, and at once when a message did not fit.
@@ -141,9 +143,9 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
 }
 
 /** Every turn running right now, Claude, Codex and ZCode: a window that reloads takes them back by these ids. */
-export function liveList(): { chatId: string; projectId: string; sessionId: string | null }[] { return [...live.entries()].map(([chatId, l]) => ({ chatId, projectId: l.projectId, sessionId: l.sessionId })).concat(codex.liveList(), zcode.liveList()); }
+export function liveList(): { chatId: string; projectId: string; sessionId: string | null }[] { return [...live.entries()].map(([chatId, l]) => ({ chatId, projectId: l.projectId, sessionId: l.sessionId })).concat(codex.liveList(), zcode.liveList(), claw.liveList()); }
 /** Is a turn of this chat running in this process (Claude here, or Codex or ZCode there)? The window asks when a hand-over fails. */
-export function isRunning(chatId: string): boolean { return live.has(chatId) || codex.isRunning(chatId) || zcode.isRunning(chatId); }
+export function isRunning(chatId: string): boolean { return live.has(chatId) || codex.isRunning(chatId) || zcode.isRunning(chatId) || claw.isRunning(chatId); }
 /** Hand a message to the turn that is running, without interrupting it. False when there is no running turn to take it. */
 // ---------- the app's own tools for a Claude session: the same channel as the message-agent block (the window routes both), for the
 // models that look for a tool when the user says "talk to X" (one searched its harness and a chat skill instead). Answered by the window.
@@ -159,15 +161,15 @@ function jauvexTools(chatId: string) {
   ] });
 }
 export async function steerChat(chatId: string, text: string, images?: Attachment[]): Promise<boolean> {
-  const entry = live.get(chatId); if (!entry) return zcode.isRunning(chatId) ? zcode.steerChat(chatId, text, images) : codex.steerChat(chatId, text, images);
+  const entry = live.get(chatId); if (!entry) return claw.isRunning(chatId) ? Promise.resolve(false) /* claw takes one message per run: the next waits */ : zcode.isRunning(chatId) ? zcode.steerChat(chatId, text, images) : codex.steerChat(chatId, text, images);
   entry.push(text, images); return true;
 }
 export function answerPermission(chatId: string, requestId: string, decision: PermissionDecision): boolean {
   const finish = live.get(chatId)?.pending.get(requestId); if (!finish) return codex.answerPermission(chatId, requestId, decision) || zcode.answerPermission(chatId, requestId, decision); finish(decision); return true;
 }
 export async function stopChat(chatId: string): Promise<boolean> {
-  const entry = live.get(chatId); if (!entry) return zcode.isRunning(chatId) ? zcode.stopChat(chatId) : codex.stopChat(chatId);
+  const entry = live.get(chatId); if (!entry) return claw.isRunning(chatId) ? claw.stopChat(chatId) : zcode.isRunning(chatId) ? zcode.stopChat(chatId) : codex.stopChat(chatId);
   try { await entry.q.interrupt(); } catch { /* not in a state that can be interrupted */ }
   entry.abort.abort(); return true;
 }
-export function stopAll(): void { for (const id of live.keys()) void stopChat(id); codex.stopAll(); zcode.stopAll(); }
+export function stopAll(): void { for (const id of live.keys()) void stopChat(id); codex.stopAll(); zcode.stopAll(); claw.stopAll(); }

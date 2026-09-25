@@ -9,7 +9,8 @@ The product name may change: say "the app" in code comments, prompts and docs, a
 A macOS desktop app (Electron + React 19 + Vite + TypeScript) in which one person runs several coding agents side by
 side, by voice or by text. Providers today: Claude (Claude Agent SDK, `electron/chat.ts`) and Codex
 (`codex app-server` over JSON-RPC, `electron/codex.ts`), and a first cut of ZCode (`zcode app-server`, the ZCode Protocol,
-`electron/zcode.ts`; its stand-in is `tests/mock/zcode`, `CVC_ZCODE_BIN`). A session belongs to one provider for life. Jev agents
+`electron/zcode.ts`; its stand-in is `tests/mock/zcode`, `CVC_ZCODE_BIN`), and Claw (the `claw` CLI of claw-code, one run per
+turn with the conversation resent: it has no server mode; `electron/claw.ts`, stand-in `tests/mock/claw`, `CVC_CLAW_BIN`). A session belongs to one provider for life. Jev agents
 (`electron/jev.ts`, `web/src/JevPad.tsx`) are typed classifiers from TypeSafe, not chats. `README.md` describes every
 feature and why it works the way it does: read the relevant part before changing a feature, and update it in the same commit.
 

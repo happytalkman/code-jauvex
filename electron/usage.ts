@@ -5,6 +5,7 @@ import * as codex from './codex.js';
 import type { RateSnapshot } from './codex.js';
 import { claudeExe } from './account.js';
 import * as zcode from './zcode.js';
+import * as claw from './claw.js';
 import { tokens } from '../shared/context.js';
 
 /**
@@ -21,7 +22,7 @@ const FRESH_MS = 30_000; // several chats are mounted at once: they share one an
 const cache = new Map<Provider, { at: number; p: Promise<ProviderUsage> }>();
 export function get(provider: Provider, force = false): Promise<ProviderUsage> {
   const hit = cache.get(provider); if (hit && !force && Date.now() - hit.at < FRESH_MS) return hit.p;
-  const p = (provider === 'codex' ? codexUsage() : provider === 'zcode' ? zcodeUsage() : claudeUsage()).catch((e): ProviderUsage => ({ provider, available: false, windows: [], at: Date.now(), error: e instanceof Error ? e.message : String(e) }));
+  const p = (provider === 'codex' ? codexUsage() : provider === 'zcode' ? zcodeUsage() : provider === 'claw' ? claw.usage().then((u) => clawFromRecord(u, Date.now())) : claudeUsage()).catch((e): ProviderUsage => ({ provider, available: false, windows: [], at: Date.now(), error: e instanceof Error ? e.message : String(e) }));
   cache.set(provider, { at: Date.now(), p }); return p;
 }
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
@@ -81,4 +82,14 @@ export function codexFromLimits(r: { rateLimits: RateSnapshot; rateLimitsByLimit
   for (const [id, snap] of Object.entries(r.rateLimitsByLimitId ?? {})) if (snap && snap !== main && id !== 'codex') windows.push(...of(snap, snap.limitName || snap.normalModelSlug || id));
   const c = main?.credits; const notes = c?.unlimited ? ['Credits: unlimited.'] : c?.hasCredits && c.balance ? [`Credits balance: ${c.balance}.`] : [];
   return { provider: 'codex', available: windows.length > 0, windows, at, ...(main?.planType ? { plan: String(main.planType) } : {}), ...(notes.length ? { notes } : {}), ...(windows.length ? {} : { error: 'Codex reported no usage windows for this sign-in.' }) };
+}
+
+/** Claw keeps no usage of its own that the app can ask for: the app's record of its turns (electron/claw.ts), in words. No windows:
+ * claw runs on an API key, billed by the provider; the cost is claw's own estimate. Pure: tests/claw-provider.test.ts. */
+export function clawFromRecord(u: { turns: number; input: number; output: number; costUsd: number; week: { turns: number; input: number; output: number; costUsd: number } }, at: number): ProviderUsage {
+  const w = u.week; const cost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : n > 0 ? 'under $0.01' : '$0');
+  const notes = w.turns ? [`Last 7 days here: ${tokens(w.input + w.output)} tokens in ${w.turns} turn${w.turns === 1 ? '' : 's'}, about ${cost(w.costUsd)} (claw's estimate).`] : ['No Claw turns here in the last 7 days.'];
+  if (u.turns > w.turns) notes.push(`All time: ${tokens(u.input + u.output)} tokens in ${u.turns} turns, about ${cost(u.costUsd)}.`);
+  notes.push('No plan limit here: Claw runs on an Anthropic API key, billed by Anthropic.');
+  return { provider: 'claw', available: true, windows: [], at, notes };
 }

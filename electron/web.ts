@@ -56,8 +56,8 @@ const account = await import('./account.js');
 const debug = await import('./debug.js');
 const voice = await import('./voice.js');
 const jev = await import('./jev.js');
-const codex = await import('./codex.js'); const zcode = await import('./zcode.js');
-function shutdown(): void { chat.stopAll(); voice.shutdown(); account.shutdown(); codex.shutdown(); zcode.shutdown(); release(); }
+const codex = await import('./codex.js'); const zcode = await import('./zcode.js'); const claw = await import('./claw.js');
+function shutdown(): void { chat.stopAll(); voice.shutdown(); account.shutdown(); codex.shutdown(); zcode.shutdown(); claw.stopAll(); release(); }
 
 account.setSink((e) => emit('account:event', e));
 debug.setSink((e) => emit('debug:event', e));

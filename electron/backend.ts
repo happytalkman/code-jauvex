@@ -10,6 +10,7 @@ import { listSessions, getSessionMessages, getSessionInfo, renameSession, type S
 import { type JauvexEntry, JEV_TEMPLATE, providerOf, type SessionPrefs, type JevAgent, type JevAnswer, type JevRun, type AppState, type Block, type ChatMessage, type MessagesPage, type ModelOption, type Project, type Provider, type SessionInfo, type UiState } from '../shared/types.js';
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
+import * as claw from './claw.js';
 import type { ContextUsage } from '../shared/context.js';
 import { opencutUrl } from '../shared/opencut.js';
 import * as jev from './jev.js';
@@ -165,10 +166,10 @@ export const backend = {
     // Every provider's sessions for this folder. Codex or ZCode being absent or logged out must not hide Claude's.
     // A failing Claude listing no longer hides Codex's; none found is said in the debug panel with where the app looked, so a user can
     // tell a Claude Code folder moved elsewhere (CLAUDE_CONFIG_DIR, taken from the login shell at start) from a folder with no sessions.
-    const [all, fromCodex, fromZcode] = await Promise.all([listSessions({ dir: project.path, limit: 500 }).catch((e: Error) => { debug.log('note', `Claude Code sessions of ${project.path} could not be listed: ${e.message}`, { by: 'app' }); return []; }), codex.listSessions(project.path).catch(() => [] as SessionInfo[]), zcode.listSessions(project.path).catch(() => [] as SessionInfo[])]);
+    const [all, fromCodex, fromZcode, fromClaw] = await Promise.all([listSessions({ dir: project.path, limit: 500 }).catch((e: Error) => { debug.log('note', `Claude Code sessions of ${project.path} could not be listed: ${e.message}`, { by: 'app' }); return []; }), codex.listSessions(project.path).catch(() => [] as SessionInfo[]), zcode.listSessions(project.path).catch(() => [] as SessionInfo[]), claw.listSessions(project.path).catch(() => [] as SessionInfo[])]);
     if (!all.length) { const cfg = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'); const sub = path.join(cfg, 'projects', project.path.replace(/[^a-zA-Z0-9]/g, '-')); const files = await fs.readdir(sub).then((f) => f.filter((x) => x.endsWith('.jsonl')).length, () => -1);
       debug.log('note', `no Claude Code sessions listed for ${project.path}: looked in ${sub} (${files < 0 ? 'no such folder' : `${files} session files there`}); Claude Code's folder is ${cfg}${process.env.CLAUDE_CONFIG_DIR ? ' (CLAUDE_CONFIG_DIR)' : ''}`, { by: 'app' }); }
-    return [...fromCodex, ...fromZcode, ...all.map((s): SessionInfo => ({ provider: 'claude', sessionId: s.sessionId, summary: shortTitle(s.summary ?? ''), lastModified: s.lastModified, createdAt: s.createdAt, fileSize: s.fileSize, customTitle: s.customTitle, firstPrompt: s.firstPrompt, gitBranch: s.gitBranch, cwd: s.cwd }))].sort((a, b) => b.lastModified - a.lastModified);
+    return [...fromCodex, ...fromZcode, ...fromClaw, ...all.map((s): SessionInfo => ({ provider: 'claude', sessionId: s.sessionId, summary: shortTitle(s.summary ?? ''), lastModified: s.lastModified, createdAt: s.createdAt, fileSize: s.fileSize, customTitle: s.customTitle, firstPrompt: s.firstPrompt, gitBranch: s.gitBranch, cwd: s.cwd }))].sort((a, b) => b.lastModified - a.lastModified);
   },
   setSessions: async (id: string, sessionIds: string[], providers: Record<string, Provider> = {}) => {
     const { state, project } = await projectOr404(id);
@@ -181,7 +182,7 @@ export const backend = {
   },
   messages: async (id: string, sessionId: string, before?: number, limit = 150): Promise<MessagesPage> => {
     const { project } = await projectOr404(id);
-    const by = providerOf(project, sessionId); const all = by === 'codex' ? await codex.transcript(sessionId) : by === 'zcode' ? await zcode.transcript(sessionId, project.path) : await transcript(project.path, sessionId);
+    const by = providerOf(project, sessionId); const all = by === 'codex' ? await codex.transcript(sessionId) : by === 'zcode' ? await zcode.transcript(sessionId, project.path) : by === 'claw' ? await claw.transcript(sessionId) : await transcript(project.path, sessionId);
     const end = before === undefined ? all.length : Math.max(0, Math.min(all.length, before));
     const start = Math.max(0, end - Math.min(500, Math.max(1, limit)));
     return { total: all.length, start, messages: all.slice(start, end) };
@@ -191,7 +192,7 @@ export const backend = {
   rename: async (id: string, sessionId: string, title: string) => {
     const { project } = await projectOr404(id); const name = String(title ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
     if (!name) throw new HttpError(400, 'A session needs a name');
-    const by = providerOf(project, sessionId); if (by === 'codex') await codex.rename(sessionId, name); else if (by === 'zcode') await zcode.rename(sessionId, name, project.path); else await renameSession(sessionId, name, { dir: project.path });
+    const by = providerOf(project, sessionId); if (by === 'codex') await codex.rename(sessionId, name); else if (by === 'zcode') await zcode.rename(sessionId, name, project.path); else if (by === 'claw') await claw.rename(sessionId, name); else await renameSession(sessionId, name, { dir: project.path });
     return true;
   },
   setPrefs: async (id: string, sessionId: string, prefs: SessionPrefs) => {
@@ -226,6 +227,6 @@ export const backend = {
     return run;
   },
   opencutUp: async (url: string): Promise<boolean> => { try { const r = await fetch(opencutUrl(url), { signal: AbortSignal.timeout(2500), redirect: 'manual' }); return r.status > 0; } catch { return false; } }, // OpenCut answers there (any answer: it is running)
-  models: async (provider: Provider): Promise<ModelOption[]> => (provider === 'codex' ? codex.models() : provider === 'zcode' ? zcode.models() : []), // Claude's list is fixed in the UI
+  models: async (provider: Provider): Promise<ModelOption[]> => (provider === 'codex' ? codex.models() : provider === 'zcode' ? zcode.models() : provider === 'claw' ? claw.CLAW_MODELS : []), // Claude's list is fixed in the UI
 };
 export type Backend = typeof backend;
