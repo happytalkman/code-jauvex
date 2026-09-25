@@ -52,7 +52,7 @@ Microsoft's C++ build tools, so `.github/workflows/claw-windows.yml` builds it f
 publishes it, with claw's MIT license, as this repository's release `claw-08106b0`; the setup downloads it and checks its size and
 SHA-256 (a published file is never replaced: a rebuild is not byte for byte the same). `JAUVEX_CLAW=0` leaves it out. Not verified
 yet: a whole claw turn on Windows (on that runner claw could not reach claw's own mock service, for a reason not found yet); on Linux
-the same claw commit runs whole turns in the app (`tests/claw-provider.test.ts`). What stays the user's: signing in (`zcode login zai`, `claude auth login`, `codex login`) and Claw's key (`setx ANTHROPIC_API_KEY sk-ant-...`).
+the same claw commit runs whole turns in the app (`tests/claw-provider.test.ts`). What stays the user's: signing in (`zcode login zai`, `claude auth login`, `codex login`) and Claw's key (`setx ANTHROPIC_API_KEY sk-ant-...`). It also sets up the browser agent (uv with winget, jev-ultrafast cloned into `<home>\jev-ultrafast` and synced; its text-model key goes in that clone's `.env`) and Paperclip (Node 24.11 or newer; started in the background, its onboarding the first time, then `scripts/paperclip.ts connect`). `JAUVEX_BROWSER=0` and `JAUVEX_PAPERCLIP=0` leave them out.
 `.github/workflows/windows.yml` runs that command on a clean Windows runner on every change to it: the install, then the app driven over
 its API (the page, the Jauvex agent, ZCode found and asking for a sign-in, Windows' speech, whisper-server hearing it).
 

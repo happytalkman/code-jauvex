@@ -65,6 +65,19 @@ jobs:
             $cs = (Rpc 'account:status' @('claw')).value; Write-Host "claw: $($cs | ConvertTo-Json -Compress)"
             Check 'Claw: the app finds claw.exe' ($cs.method -match '^claw ') "$($cs.method) $($cs.error)"
             Check '... and asks for an API key' ((-not $cs.signedIn) -and $cs.error -match 'ANTHROPIC_API_KEY') "$($cs.error)"
+            # Paperclip, started and connected by the install: running, this app in its company, its issues readable with the kept key
+            $ErrorActionPreference = 'Continue'
+            $pcs = node scripts\paperclip.ts status | ConvertFrom-Json; Write-Host "paperclip: $($pcs | ConvertTo-Json -Compress)"
+            Check 'Paperclip runs, and this app is connected to its company' ($pcs.up -and $pcs.connected) ''
+            $iss = node scripts\paperclip.ts GET '/api/companies/{companyId}/issues'; Check '... its issues come back with the kept key' ($LASTEXITCODE -eq 0 -and "$iss".TrimStart().StartsWith('[')) "$iss"
+            $new = node scripts\paperclip.ts POST '/api/companies/{companyId}/issues' '{"title":"Windows check"}' | ConvertFrom-Json
+            $cm = node scripts\paperclip.ts POST "/api/issues/$($new.id)/comments" '{"body":"from the Windows check"}' | ConvertFrom-Json
+            Check '... an issue opened, and a comment on it (as the board, marked)' ($new.id -and $cm.body -eq '[from Jauvex] from the Windows check') "$($cm | ConvertTo-Json -Compress)"
+            # the browser agent, set up by the install: its clone and environment are there; without a TypeSafe key it says so
+            $env:Path = "$HOME\.local\bin;$env:Path"
+            Check 'the browser agent (jev-ultrafast) is cloned and synced' ((Test-Path "$HOME\jev-ultrafast\pyproject.toml") -and (Test-Path "$HOME\jev-ultrafast\.venv")) ''
+            $b = node scripts\browse.ts --url https://example.com --goal 'Open it' 2>&1 | Out-String; Check '... and without a TypeSafe key it says so' ($b -match 'needs a TypeSafe key') "$b"
+            $ErrorActionPreference = 'Stop'
             $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
             Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''
             Check 'setup: whisper-server is found' ($sc.whisperBinary) ''

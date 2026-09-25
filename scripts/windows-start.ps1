@@ -4,7 +4,7 @@
 # the voice with npm run voice:setup), what is there is kept, and the app starts (npm run web) and opens the browser. Run it again any time:
 # it only does what is still missing, then starts the app. JAUVEX_DIR moves the copy (default: <home>\jauvex), JAUVEX_BRANCH picks the branch,
 # JAUVEX_NO_START=1 stops before starting it (the Windows check, .github/workflows/windows.yml), JAUVEX_ZCODE=0 leaves ZCode out,
-# JAUVEX_CLAW=0 leaves Claw out, JAUVEX_WEAIDDB=0 leaves WEAIDdb out.
+# JAUVEX_CLAW=0 leaves Claw out, JAUVEX_WEAIDDB=0 leaves WEAIDdb out, JAUVEX_BROWSER=0 the browser agent (jev-ultrafast), JAUVEX_PAPERCLIP=0 Paperclip.
 # ZCode (github.com/zai-org/ZCode), the third agent, is built from its source into <home>\zcode (Node 24, pnpm) and its zcode command
 # put in <home>\.jauvex\bin, on the user's PATH; it is rebuilt only when its source moved. Its sign-in stays the user's: zcode login zai.
 $ErrorActionPreference = 'Stop'
@@ -23,8 +23,8 @@ function Install-WithWinget($id, $what) { # not named Winget: PowerShell names i
 }
 
 # Node 22.18 or newer: the app's scripts are TypeScript that Node runs as it is. ZCode needs 24.
-$withZcode = $env:JAUVEX_ZCODE -ne '0'
-$nodeMin = if ($withZcode) { [version]'24.0.0' } else { [version]'22.18.0' }
+$withZcode = $env:JAUVEX_ZCODE -ne '0'; $withPaperclip = $env:JAUVEX_PAPERCLIP -ne '0'; $withBrowser = $env:JAUVEX_BROWSER -ne '0'
+$nodeMin = if ($withPaperclip) { [version]'24.11.0' } elseif ($withZcode) { [version]'24.0.0' } else { [version]'22.18.0' } # Paperclip needs 24.11, ZCode 24, the app 22.18
 function Node-Ok { if (-not (Has 'node')) { return $false }; try { [version]((node -v).TrimStart('v')) -ge $nodeMin } catch { $false } }
 if (-not (Node-Ok)) {
   if (Has 'node') { Write-Host "Node $(node -v) is too old: this needs $nodeMin or newer." -ForegroundColor Yellow }
@@ -102,6 +102,42 @@ if ($env:JAUVEX_WEAIDDB -ne '0') {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dir 'scripts\weaiddb.ps1') start
     if ($LASTEXITCODE) { Write-Host 'WEAIDdb is not running (see above); the app runs without it meanwhile. Run this again to retry.' -ForegroundColor Yellow }
   } else { Write-Host "WEAIDdb (the agents' graph database) runs in Docker: install Docker Desktop (https://www.docker.com/products/docker-desktop/), start it, then run this again." -ForegroundColor Yellow }
+}
+
+# The browser agent (jev-ultrafast, shared/browse.ts): its clone in <home>\jev-ultrafast and its uv environment. Its keys stay the
+# user's: TypeSafe's (the app's own, TYPESAFE_API_KEY or <home>\.typesafe\token) and the text model's, in that clone's .env.
+if ($withBrowser) {
+  try {
+    if (-not (Has 'uv')) { Install-WithWinget 'astral-sh.uv' 'uv'; if (-not (Has 'uv')) { $env:Path = "$HOME\.local\bin;$env:Path" } }
+    if (-not (Has 'uv')) { throw 'uv is not reachable yet (open a new PowerShell and run this again)' }
+    $jev = Join-Path $HOME 'jev-ultrafast'
+    if (-not (Test-Path (Join-Path $jev 'pyproject.toml'))) { Say "Getting the browser agent (jev-ultrafast) into $jev"; git clone --depth 1 https://github.com/browser-use/jev-ultrafast $jev; if ($LASTEXITCODE) { throw 'git clone failed' } }
+    else { git -C $jev pull --ff-only | Out-Null } # stdout only: Windows PowerShell turns a redirected stderr into an error
+    Say 'The browser agent: its Python environment (uv sync)'; Push-Location $jev; try { uv sync; if ($LASTEXITCODE) { throw 'uv sync failed' } } finally { Pop-Location }
+    if (-not (Test-Path (Join-Path $jev '.env')) -and (Test-Path (Join-Path $jev '.env.example'))) { Copy-Item (Join-Path $jev '.env.example') (Join-Path $jev '.env') }
+    if (-not ((Get-Content (Join-Path $jev '.env') -Raw) -match '(?m)^TEXT_MODEL_API_KEY=\S')) { Write-Host "The browser agent types text with a small model: put an OpenRouter key after TEXT_MODEL_API_KEY= in $jev\.env (TypeSafe's key is the app's own)." -ForegroundColor Yellow }
+  } catch { Write-Host "The browser agent is not ready ($($_.Exception.Message)); the app runs without it meanwhile." -ForegroundColor Yellow }
+}
+
+# Paperclip (shared/paperclip.ts): started in the background on http://127.0.0.1:3100 (the first time: its onboarding, trusted local
+# mode, its own database), then this app joins its company once (node scripts/paperclip.ts connect).
+if ($withPaperclip) {
+  try {
+    $up = { try { (Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:3100/api/health' -TimeoutSec 3).StatusCode -eq 200 } catch { $false } }
+    if (-not (& $up)) {
+      $first = -not (Test-Path (Join-Path $HOME '.paperclip\instances\default\config.json'))
+      Say "Starting Paperclip$(if ($first) { ' (the first time: its setup and database, a minute or two)' })"
+      $log = Join-Path $HOME '.jauvex\paperclip.log'; New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+      $pcArgs = if ($first) { @('-y', 'paperclipai@latest', 'onboard', '--yes', '--no-install-service') } else { @('-y', 'paperclipai@latest', 'run') }
+      Start-Process -FilePath 'npx.cmd' -ArgumentList $pcArgs -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError "$log.err" | Out-Null
+      for ($i = 0; $i -lt 90 -and -not (& $up); $i++) { Start-Sleep 2 }
+    }
+    if (& $up) {
+      $st = node (Join-Path $dir 'scripts\paperclip.ts') status | ConvertFrom-Json
+      if (-not $st.connected) { node (Join-Path $dir 'scripts\paperclip.ts') connect; if ($LASTEXITCODE -eq 2) { node (Join-Path $dir 'scripts\paperclip.ts') connect --company 'Jauvex' } } # a fresh Paperclip has no company yet
+      Say 'Paperclip is running: http://127.0.0.1:3100 (the Paperclip item in the sidebar)'
+    } else { Write-Host "Paperclip did not come up; its log: $HOME\.jauvex\paperclip.log" -ForegroundColor Yellow }
+  } catch { Write-Host "Paperclip is not ready ($($_.Exception.Message)); the app runs without it meanwhile." -ForegroundColor Yellow }
 }
 
 # Claude and Codex themselves come with npm install; their command lines are only for signing in (the app signs no one in).
