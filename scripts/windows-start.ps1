@@ -147,9 +147,22 @@ if ($withPaperclip) {
       $pcArgs = if ($first) { @('onboard', '--yes', '--no-install-service') } else { @('run') }
       # stdin from an empty file: a prompt then ends at once instead of waiting on a hidden window nobody sees
       $empty = Join-Path $HOME '.jauvex\empty.txt'; Set-Content -Path $empty -Value $null
-      $pc = Start-Process -FilePath $nodeExe -ArgumentList (@("`"$pcMain`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardInput $empty -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru
+      $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+      if ($admin) {
+        # its embedded PostgreSQL will not run with administrative rights ("Execution of PostgreSQL by a user with administrative
+        # permissions is not permitted": the Windows check, and a setup run from an elevated PowerShell), so it starts as a basic user
+        # (runas /trustlevel: the Administrators group kept deny-only, as PostgreSQL's own pg_ctl does); a batch file carries the redirections
+        $bat = Join-Path $HOME '.jauvex\paperclip-start.cmd'
+        $line = "`"$nodeExe`" `"$pcMain`" $($pcArgs -join ' ') < `"$empty`" > `"$log`" 2> `"$log.err`""
+        [IO.File]::WriteAllText($bat, "@chcp 65001 >nul`r`n@$line`r`n", (New-Object Text.UTF8Encoding $false))
+        Write-Host 'This PowerShell has administrative rights: Paperclip starts as a basic user (its database will not run as an administrator).'
+        $pc = $null; Start-Process runas.exe -ArgumentList "/trustlevel:0x20000 `"cmd /c call \`"$bat\`"`"" -WindowStyle Hidden
+      } else {
+        $pc = Start-Process -FilePath $nodeExe -ArgumentList (@("`"$pcMain`"") + $pcArgs) -WindowStyle Hidden -RedirectStandardInput $empty -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru
+        $null = $pc.Handle # kept, so its exit code can be read once it ends
+      }
       $clock = [Diagnostics.Stopwatch]::StartNew() # the first time: its database is made
-      while ($clock.Elapsed.TotalMinutes -lt 6 -and -not $pc.HasExited -and -not (& $up)) { Start-Sleep 2 }
+      while ($clock.Elapsed.TotalMinutes -lt 6 -and -not ($pc -and $pc.HasExited) -and -not (& $up)) { Start-Sleep 2 }
     }
     if (& $up) {
       $st = node (Join-Path $dir 'scripts\paperclip.ts') status | ConvertFrom-Json
@@ -159,7 +172,7 @@ if ($withPaperclip) {
       Write-Host "Paperclip did not come up$(if ($pc -and $pc.HasExited) { " (it ended, code $($pc.ExitCode))" } else { ' in 6 minutes' }); the end of its log ($HOME\.jauvex\paperclip.log):" -ForegroundColor Yellow
       Get-Content "$HOME\.jauvex\paperclip.log", "$HOME\.jauvex\paperclip.log.err" -Tail 25 -ErrorAction SilentlyContinue
       # what it is doing: its processes (the server and its database) and Paperclip's own logs
-      if ($pc -and -not $pc.HasExited) { Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|cmd|postgres|initdb|pg_ctl)\.exe$' } | ForEach-Object { Write-Host "  $($_.ProcessId) <- $($_.ParentProcessId): $("$($_.CommandLine)".Substring(0, [Math]::Min(200, "$($_.CommandLine)".Length)))" } }
+      if (-not ($pc -and $pc.HasExited)) { Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(node|cmd|postgres|initdb|pg_ctl)\.exe$' } | ForEach-Object { Write-Host "  $($_.ProcessId) <- $($_.ParentProcessId): $("$($_.CommandLine)".Substring(0, [Math]::Min(200, "$($_.CommandLine)".Length)))" } }
       Get-ChildItem (Join-Path $HOME '.paperclip\instances\default\logs') -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "--- $($_.FullName)"; Get-Content $_.FullName -Tail 15 }
     }
   } catch { Write-Host "Paperclip is not ready ($($_.Exception.Message)); the app runs without it meanwhile." -ForegroundColor Yellow }
