@@ -36,7 +36,6 @@ jobs:
           cargo build --release -p rusty-claude-cli; if ($LASTEXITCODE) { throw 'cargo build failed' }
           .\target\release\claw.exe --version
       - name: One real turn on Windows, against a stand-in for the Anthropic API
-        continue-on-error: true  # claw.exe is checked by --version above; this says whether a whole turn runs, and why not
         shell: powershell
         working-directory: claw/rust
         run: |
@@ -54,7 +53,6 @@ jobs:
           Pop-Location; taskkill /PID $mock.Id /T /F | Out-Null; Write-Host '--- what the stand-in received'; Get-Content mock.err
           Write-Host $out
           if (-not ($out -match 'Stand-in says hello: hello from Windows via stdin')) { throw 'claw.exe did not answer' }
-          $doc = & .\target\release\claw.exe doctor --output-format json | ConvertFrom-Json; Write-Host "doctor auth: $(($doc.checks | Where-Object name -eq 'auth').status)"
       - name: Publish claw.exe as this repository's release
         shell: powershell
         env:
