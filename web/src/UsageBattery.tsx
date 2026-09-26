@@ -28,6 +28,7 @@ export function UsageBattery({ provider, model, tick, others = [] }: { provider:
   let button;
   if (!u) button = <button className="battery unknown" title={`Checking how much ${name} usage is left…`} aria-label={`${name} usage: checking`} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /></button>;
   else if (!u.available) button = <button className="battery off" title={`${name} usage is not available here: ${u.error ?? 'no usage information for this account'}.`} aria-label={`${name} usage not available`} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /><span className="battery-pct">n/a</span></button>;
+  else if (!u.windows.length) button = <button className="battery off" title={`${name}: no plan limit here.${u.notes?.length ? `\n${u.notes.slice(0, -1).join('\n')}` : ''}\nClick for more.`} aria-label={`${name} usage: no plan limit`} aria-expanded={open} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /><span className="battery-pct">∞</span></button>; // tokens used, no window to fill: ZCode on API-key providers
   else {
     // A window that belongs to one model only counts when that is the model in use (known once it is picked, or reported by the first turn).
     const mine = u.windows.filter((w) => counts(w, model)); const counted = mine.length ? mine : u.windows;
@@ -46,7 +47,7 @@ export function UsageBattery({ provider, model, tick, others = [] }: { provider:
           <div className="ctx-head"><strong>Usage</strong><button className="use-refresh" disabled={busy} onClick={() => void refresh()}>{busy ? 'Refreshing…' : 'Refresh'}</button></div>
           <UsageSection usage={u} provider={provider} model={model} here />
           {others.map((p) => <UsageSection key={p} usage={more[p] ?? null} provider={p} model="" />)}
-          <p className="ctx-foot">How much of each plan is left, window by window. Refreshed every minute and after each turn.</p>
+          <p className="ctx-foot">How much of each plan is left, window by window (ZCode: the tokens used, it has no plan limit here). Refreshed every minute and after each turn.</p>
         </div>
       )}
     </span>

@@ -1,0 +1,72 @@
+# claw for Windows: claw-code (github.com/ultraworkers/claw-code, MIT) publishes no release, and building it needs Rust and Microsoft's
+# C++ build tools (gigabytes, and an administrator), too much for a user's setup. This builds claw.exe from the pinned commit on a Windows
+# runner, runs one real turn with it against a stand-in for the Anthropic API (tests/mock/anthropic.ts), and publishes it with claw's license as this repository's
+# release claw-<commit>, which scripts/windows-start.ps1 downloads and checks by SHA-256.
+name: claw-windows
+on:
+  push:
+    branches: ['claude/**', 'master']
+    paths: ['.github/workflows/claw-windows.yml', 'tests/mock/anthropic.ts']
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  CLAW_COMMIT: 08106b0c3771ef5b4a5aa176acccd460e88b7325
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Get claw-code at the pinned commit
+        shell: powershell
+        run: |
+          git init claw; git -C claw remote add origin https://github.com/ultraworkers/claw-code
+          git -C claw fetch --depth 1 origin $env:CLAW_COMMIT; git -C claw checkout FETCH_HEAD; git -C claw log -1 --format='%H %cd'
+      - uses: actions/checkout@v4  # this app, for its stand-in of the Anthropic API
+        with: { path: app }
+      - uses: actions/setup-node@v4  # the stand-in is TypeScript, which Node runs as it is from 22.18
+        with: { node-version: '24' }
+      - uses: actions/cache@v4
+        with: { path: 'claw/rust/target', key: 'claw-target-${{ env.CLAW_COMMIT }}' }
+      - name: Build claw.exe
+        shell: powershell
+        working-directory: claw/rust
+        run: |
+          cargo --version
+          cargo build --release -p rusty-claude-cli; if ($LASTEXITCODE) { throw 'cargo build failed' }
+          .\target\release\claw.exe --version
+      - name: One real turn on Windows, against a stand-in for the Anthropic API
+        shell: powershell
+        working-directory: claw/rust
+        run: |
+          $ErrorActionPreference = 'Continue'  # GitHub's powershell shell starts with Stop
+          # no ErrorActionPreference Stop: Windows PowerShell turns a native command's stderr into an error; the checks below decide
+          # claw's own mock service took the connection on Windows but never answered (it closes on any request it cannot place, silently),
+          # and claw said "error sending request" nine times; the stand-in answers every request and logs each one on stderr
+          $mock = Start-Process node -ArgumentList "`"$env:GITHUB_WORKSPACE\app\tests\mock\anthropic.ts`"", '--port', '4410' -PassThru -NoNewWindow -RedirectStandardError mock.err
+          $up = $false; for ($i = 0; $i -lt 30 -and -not $up; $i++) { Start-Sleep -Milliseconds 500; try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 4410); $c.Close(); $up = $true } catch { } }
+          if (-not $up) { Get-Content mock.err -ErrorAction SilentlyContinue; throw 'the stand-in did not start' }
+          $env:ANTHROPIC_API_KEY = 'mock-key'; $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:4410'
+          $env:NO_PROXY = '127.0.0.1,localhost'; $env:no_proxy = $env:NO_PROXY  # on Windows claw's HTTP client also takes the system's proxy settings
+          $dir = Join-Path $env:RUNNER_TEMP 'clawproj'; New-Item -ItemType Directory -Force $dir | Out-Null; Push-Location $dir
+          $out = 'hello from Windows via stdin' | & "$env:GITHUB_WORKSPACE\claw\rust\target\release\claw.exe" --output-format json --permission-mode workspace-write
+          Pop-Location; taskkill /PID $mock.Id /T /F | Out-Null; Write-Host '--- what the stand-in received'; Get-Content mock.err
+          Write-Host $out
+          if (-not ($out -match 'Stand-in says hello: hello from Windows via stdin')) { throw 'claw.exe did not answer' }
+      - name: Publish claw.exe as this repository's release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Continue'  # GitHub's powershell shell starts with Stop, and gh says "release not found" on stderr
+          $short = $env:CLAW_COMMIT.Substring(0, 7); $tag = "claw-$short"; $d = Join-Path $env:RUNNER_TEMP 'rel'; New-Item -ItemType Directory -Force $d | Out-Null
+          Copy-Item claw\rust\target\release\claw.exe (Join-Path $d 'claw.exe'); Copy-Item claw\LICENSE (Join-Path $d 'claw-LICENSE.txt')
+          $sum = (Get-FileHash (Join-Path $d 'claw.exe') -Algorithm SHA256).Hash.ToLower(); $size = (Get-Item (Join-Path $d 'claw.exe')).Length
+          Set-Content (Join-Path $d 'claw.exe.sha256') "$sum  claw.exe" -Encoding ascii
+          Write-Host "claw.exe: $size bytes, sha256 $sum"
+          $notes = "claw.exe for Windows x64, built from github.com/ultraworkers/claw-code at $env:CLAW_COMMIT (MIT; its license is claw-LICENSE.txt) by .github/workflows/claw-windows.yml. SHA-256: $sum. Used by scripts/windows-start.ps1."
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null; $exists = $LASTEXITCODE -eq 0  # stderr for a missing release: not an error here
+          # a published claw.exe is never replaced: the setup pins its SHA-256, and a rebuild is not byte for byte the same
+          if ($exists) { Write-Host "$tag is already published: kept as it is (this build: $sum)"; exit 0 }
+          else { gh release create $tag (Join-Path $d 'claw.exe') (Join-Path $d 'claw.exe.sha256') (Join-Path $d 'claw-LICENSE.txt') --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "claw for Windows ($short)" --notes $notes }
+          if ($LASTEXITCODE) { throw 'publishing the release failed' }

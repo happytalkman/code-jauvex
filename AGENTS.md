@@ -8,11 +8,14 @@ The product name may change: say "the app" in code comments, prompts and docs, a
 
 A macOS desktop app (Electron + React 19 + Vite + TypeScript) in which one person runs several coding agents side by
 side, by voice or by text. Providers today: Claude (Claude Agent SDK, `electron/chat.ts`) and Codex
-(`codex app-server` over JSON-RPC, `electron/codex.ts`). A session belongs to one provider for life. Jev agents
+(`codex app-server` over JSON-RPC, `electron/codex.ts`), and a first cut of ZCode (`zcode app-server`, the ZCode Protocol,
+`electron/zcode.ts`; its stand-in is `tests/mock/zcode`, `CVC_ZCODE_BIN`), and Claw (the `claw` CLI of claw-code, one run per
+turn with the conversation resent: it has no server mode; `electron/claw.ts`, stand-in `tests/mock/claw`, `CVC_CLAW_BIN`). A session belongs to one provider for life. Jev agents
 (`electron/jev.ts`, `web/src/JevPad.tsx`) are typed classifiers from TypeSafe, not chats. `README.md` describes every
 feature and why it works the way it does: read the relevant part before changing a feature, and update it in the same commit.
 
-- `electron/` main process: `main.ts` (window, IPC), `backend.ts` (state, sessions), `chat.ts`, `codex.ts`, `voice.ts`
+- `electron/` main process: `main.ts` (window, IPC), `web.ts` (the web version, `npm run web`: the same calls over HTTP; keep it in step
+  with `main.ts`, `tests/web.test.ts` checks every channel), `backend.ts` (state, sessions), `chat.ts`, `codex.ts`, `voice.ts`
   (Whisper, `say`, the voice helper, all voice decisions), `jev.ts`, `usage.ts`, `debug.ts`.
 - `web/src/` the window: `App.tsx` (sidebar, `Chat`, `Composer`, debugger), `voice.ts` (VAD and playback), `Orb.tsx`.
 - `shared/types.ts` types and the texts both sides share; `shared/roster.ts` session titles, unique short ids and the
@@ -96,7 +99,8 @@ session is working: do not restart.
   working on a part of the window, run that part's window check by name (`sh tests/run.sh <name>`).
 - **Stand-ins:** `tests/mock/claude` and `tests/mock/codex` answer like Claude Code and `codex app-server` with canned
   replies and no account (`CVC_CLAUDE_BIN`, `CVC_CODEX_BIN` point the app at them). When `chat.ts` or `codex.ts` starts
-  reading a new message or method, teach the stand-in too.
+  reading a new message or method, teach the stand-in too. `tests/mock/whisper-server` and `tests/mock/say` stand in for the
+  voice's ears and mouth (put `tests/mock` first on the PATH; the web check does).
 - One-off experiments stay in `tmp/` (git-ignored). Speech into the app: `--use-file-for-fake-audio-capture=<file>.wav%noloop`
   with a 48 kHz mono WAV made by `say -o` (pad silence with Python's `wave`; every new capture replays the file).
 

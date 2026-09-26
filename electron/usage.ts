@@ -4,19 +4,25 @@ import type { Provider, ProviderUsage, UsageWindow } from '../shared/types.js';
 import * as codex from './codex.js';
 import type { RateSnapshot } from './codex.js';
 import { claudeExe } from './account.js';
+import * as zcode from './zcode.js';
+import * as claw from './claw.js';
+import { tokens } from '../shared/context.js';
 
 /**
  * How much of the plan is left, per provider: what the battery next to the composer shows.
  *   Claude: the data behind `/usage` (the SDK's experimental usage request, so every field is read defensively), asked of a
  *           short-lived idle process: nothing is sent to a model and nothing is persisted. About a second.
  *   Codex:  `account/rateLimits/read` on the app-server that is already running.
+ *   ZCode:  no plan windows: here it runs on API-key providers, which have no plan limit, and a Coding Plan's quota comes from ZCode's
+ *           account service, which only its desktop host reaches. What it has is its own record of the tokens used on this Mac
+ *           (`usage/stats`, last 7 days), said in words: no battery level, the battery shows "no limit".
  * Only percentages, window lengths and reset times leave this file: no account IDs, no credentials.
  */
 const FRESH_MS = 30_000; // several chats are mounted at once: they share one answer
 const cache = new Map<Provider, { at: number; p: Promise<ProviderUsage> }>();
 export function get(provider: Provider, force = false): Promise<ProviderUsage> {
   const hit = cache.get(provider); if (hit && !force && Date.now() - hit.at < FRESH_MS) return hit.p;
-  const p = (provider === 'codex' ? codexUsage() : claudeUsage()).catch((e): ProviderUsage => ({ provider, available: false, windows: [], at: Date.now(), error: e instanceof Error ? e.message : String(e) }));
+  const p = (provider === 'codex' ? codexUsage() : provider === 'zcode' ? zcodeUsage() : provider === 'claw' ? claw.usage().then((u) => clawFromRecord(u, Date.now())) : claudeUsage()).catch((e): ProviderUsage => ({ provider, available: false, windows: [], at: Date.now(), error: e instanceof Error ? e.message : String(e) }));
   cache.set(provider, { at: Date.now(), p }); return p;
 }
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
@@ -48,6 +54,23 @@ export function claudeFromUsage(u: ClaudeReport, at: number): ProviderUsage {
   return { provider: 'claude', available: windows.length > 0, windows, at, ...(typeof u.subscription_type === 'string' && u.subscription_type ? { plan: u.subscription_type } : {}), ...(notes.length ? { notes } : {}) };
 }
 
+async function zcodeUsage(): Promise<ProviderUsage> {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone; const at = Date.now();
+  return zcodeFromStats(await zcode.usageStats('7d', timeZone) as ZStats, at, new Date(at).toLocaleDateString('en-CA', { timeZone }));
+}
+type ZStats = { summary?: { totalTokens?: number; totalTurns?: number } | null; models?: { modelId: string | null; totalTokens: number; share: number }[]; dailyModelUsage?: { date: string; models: { totalTokens: number }[] }[] };
+/** ZCode's own record of the last 7 days (`usage/stats`) in words: the tokens and turns, the model used most, and today's tokens. No
+ * windows: API-key providers have no plan limit. `today` is the local date (YYYY-MM-DD). Pure: tests/usage-panel.test.ts. */
+export function zcodeFromStats(s: ZStats | null | undefined, at: number, today: string): ProviderUsage {
+  const total = s?.summary?.totalTokens ?? 0; const turns = s?.summary?.totalTurns ?? 0;
+  const notes = total > 0 ? [`Last 7 days on this Mac: ${tokens(total)} tokens in ${turns} turn${turns === 1 ? '' : 's'}.`] : ['No ZCode turns on this Mac in the last 7 days.'];
+  const top = [...(s?.models ?? [])].filter((m) => m.modelId).sort((a, b) => b.totalTokens - a.totalTokens)[0];
+  if (top && total > 0) notes.push(`Most of it on ${top.modelId} (${Math.round(top.share <= 1 ? top.share * 100 : top.share)} %).`);
+  const day = s?.dailyModelUsage?.find((d) => d.date === today); const todayTokens = (day?.models ?? []).reduce((n, m) => n + m.totalTokens, 0);
+  if (total > 0) notes.push(`Today: ${todayTokens ? `${tokens(todayTokens)} tokens` : 'none yet'}.`);
+  notes.push('No plan limit here: ZCode runs on providers with an API key, billed by the provider.');
+  return { provider: 'zcode', available: true, windows: [], at, notes };
+}
 async function codexUsage(): Promise<ProviderUsage> { return codexFromLimits(await codex.rateLimits(), Date.now()); }
 /** Codex's windows: its ordinary limit (`codex`) and each model's own extra limit, named after the model (counted only while that model is
  * in use, as Codex's own status does), plus the plan and credits. Pure: tests/usage-panel.test.ts. */
@@ -59,4 +82,14 @@ export function codexFromLimits(r: { rateLimits: RateSnapshot; rateLimitsByLimit
   for (const [id, snap] of Object.entries(r.rateLimitsByLimitId ?? {})) if (snap && snap !== main && id !== 'codex') windows.push(...of(snap, snap.limitName || snap.normalModelSlug || id));
   const c = main?.credits; const notes = c?.unlimited ? ['Credits: unlimited.'] : c?.hasCredits && c.balance ? [`Credits balance: ${c.balance}.`] : [];
   return { provider: 'codex', available: windows.length > 0, windows, at, ...(main?.planType ? { plan: String(main.planType) } : {}), ...(notes.length ? { notes } : {}), ...(windows.length ? {} : { error: 'Codex reported no usage windows for this sign-in.' }) };
+}
+
+/** Claw keeps no usage of its own that the app can ask for: the app's record of its turns (electron/claw.ts), in words. No windows:
+ * claw runs on an API key, billed by the provider; the cost is claw's own estimate. Pure: tests/claw-provider.test.ts. */
+export function clawFromRecord(u: { turns: number; input: number; output: number; costUsd: number; week: { turns: number; input: number; output: number; costUsd: number } }, at: number): ProviderUsage {
+  const w = u.week; const cost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : n > 0 ? 'under $0.01' : '$0');
+  const notes = w.turns ? [`Last 7 days here: ${tokens(w.input + w.output)} tokens in ${w.turns} turn${w.turns === 1 ? '' : 's'}, about ${cost(w.costUsd)} (claw's estimate).`] : ['No Claw turns here in the last 7 days.'];
+  if (u.turns > w.turns) notes.push(`All time: ${tokens(u.input + u.output)} tokens in ${u.turns} turns, about ${cost(u.costUsd)}.`);
+  notes.push('No plan limit here: Claw runs on an Anthropic API key, billed by Anthropic.');
+  return { provider: 'claw', available: true, windows: [], at, notes };
 }

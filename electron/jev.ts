@@ -21,27 +21,12 @@ import * as debug from './debug.js';
 const BASE = 'https://api.typesafe.ai';
 const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 4 }); // a warm connection answers in a third of the time
 
-const clean = (v: unknown): string => (typeof v === 'string' ? v.trim().replace(/^["']|["']$/g, '') : '');
-function parseCredential(text: string): string {
-  const raw = text.replace(/^\uFEFF/, '').trim(); if (!raw) return '';
-  const named = (o: Record<string, string>) => clean(o.typesafe_api_key ?? o.api_key ?? o.apikey ?? o.key ?? o.token ?? '');
-  if (raw.startsWith('{')) {
-    try { const flat: Record<string, string> = {}; const walk = (o: unknown, d: number) => { if (!o || typeof o !== 'object' || d > 3) return; for (const [k, v] of Object.entries(o)) { if (typeof v === 'string') flat[k.toLowerCase()] ??= v; else walk(v, d + 1); } }; walk(JSON.parse(raw), 0); return named(flat); } catch { return ''; }
-  }
-  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  const pairs: Record<string, string> = {};
-  for (const l of lines) { const m = /^(?:export\s+)?([A-Za-z_][\w.-]*)\s*[=:]\s*(.*)$/.exec(l); if (m) pairs[m[1]!.toLowerCase()] = m[2]!; }
-  if (Object.keys(pairs).length) { const values = Object.values(pairs).map(clean).filter(Boolean); return named(pairs) || (values.length === 1 ? values[0]! : ''); }
-  return lines.length === 1 ? clean(lines[0]) : '';
-}
-
-/** The files the key may be in, in order: ~/.typesafe/token, then the older ~/.typesafe/jev (JEV_CREDENTIAL_FILE: the checks' own). */
-export const keyFiles = (home: string, env: NodeJS.ProcessEnv = process.env): string[] =>
-  (env.JEV_CREDENTIAL_FILE ? [env.JEV_CREDENTIAL_FILE] : [path.join(home, '.typesafe', 'token'), path.join(home, '.typesafe', 'jev')]);
+import { keyFiles, parseCredential } from '../shared/typesafe.js';
+export { keyFiles };
 let key: Promise<string> | null = null;
 function credential(): Promise<string> {
   return (key ??= (async () => {
-    const env = clean(process.env.TYPESAFE_API_KEY); if (env) return env;
+    const env = parseCredential(process.env.TYPESAFE_API_KEY ?? ''); if (env) return env;
     for (const f of keyFiles(homedir())) { try { const k = parseCredential(await readFile(f, 'utf8')); if (k) return k; } catch { /* not there: the next one */ } }
     return '';
   })());
@@ -49,6 +34,8 @@ function credential(): Promise<string> {
 /** Whether a key is on this machine. (It says nothing about the service being up: every decision has its own fallback.) */
 let enabled = true; // the voice settings can hand every decision back to the voice model
 export function setEnabled(on: boolean): void { enabled = on; }
+/** The key itself, for a tool the app runs on the user's behalf (jev-ultrafast's browser agent): passed in its environment, never shown. */
+export const typesafeKey = (): Promise<string> => credential();
 export async function hasKey(): Promise<boolean> { return Boolean(await credential()); }
 export async function available(): Promise<boolean> { return enabled && process.env.CVC_JEV !== 'off' && Boolean(await credential()); }
 

@@ -17,7 +17,9 @@ prep() { # prep <check>: its name, a data folder of its own (the fixture state u
   grep -q '^// fresh' "$t" || sed "s|__ROOT__|$ROOT|g" tests/fixtures/state.json > "$DATA/state.json"
   envs=$(sed -n 's|^// env: ||p' "$t" | sed "s|__ROOT__|$ROOT|g" | tr '\n' ' ') # __ROOT__: this repository (the stand-ins in tests/mock)
 }
-backend() { env $envs CVC_ROOT="$ROOT" CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" npx tsx "$1" 2>&1; }
+# ZCode is looked for on the PATH: a check never meets a real one unless it names one (// env: CVC_ZCODE_BIN=__ROOT__/tests/mock/zcode).
+NOZCODE="$ROOT/tmp/no-zcode"
+backend() { env CVC_ZCODE_BIN="$NOZCODE" $envs CVC_ROOT="$ROOT" CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" npx tsx "$1" 2>&1; }
 judge() { # judge <name> <output>: its lines; a check counts as failed when it failed, crashed, or ended without its summary line
   printf '%s\n' "$2" | grep -E '^(PASS|FAIL|ok |BAD |skip)'
   if printf '%s\n' "$2" | grep -qE '^(FAIL|BAD )|FAILED'; then fail=$((fail+1)); printf '%s\n' "$2" | grep -vE '^(PASS|ok )' | tail -8
@@ -39,9 +41,10 @@ else
     prep "$t" || continue
     flags=""; grep -q '^// needs: mic' "$t" && flags="--no-sandbox --use-fake-device-for-media-stream --use-fake-ui-for-media-stream"
     wav=$(sed -n 's|^// wav: ||p' "$t"); [ -n "$wav" ] && flags="$flags --use-file-for-fake-audio-capture=$ROOT/$wav%noloop"
+    flags="$flags ${CVC_ELECTRON_FLAGS:-}"  # e.g. --no-sandbox, which Electron needs when run as root (a Linux container, under xvfb-run)
     echo "== $name"; ran=$((ran+1))
     case "$t" in
-      tests/window/*) env $envs CVC_HIDDEN=1 CVC_WHISPER_PORT=4331 CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" ./node_modules/.bin/electron . --remote-debugging-port=9341 $flags > "$DATA/app.log" 2>&1 & pid=$!
+      tests/window/*) env CVC_ZCODE_BIN="$NOZCODE" $envs CVC_HIDDEN=1 CVC_WHISPER_PORT=4331 CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" ./node_modules/.bin/electron . --remote-debugging-port=9341 $flags > "$DATA/app.log" 2>&1 & pid=$!
          out=$(CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" node "$t" 2>&1); ps -p $pid -o command= 2>/dev/null | grep -q electron && kill $pid; wait $pid 2>/dev/null; sleep 1 ;;
       *) out=$(backend "$t") ;;
     esac
