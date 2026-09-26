@@ -1,12 +1,12 @@
 # claw for Windows: claw-code (github.com/ultraworkers/claw-code, MIT) publishes no release, and building it needs Rust and Microsoft's
 # C++ build tools (gigabytes, and an administrator), too much for a user's setup. This builds claw.exe from the pinned commit on a Windows
-# runner, runs one real turn with it against claw's own mock Anthropic service, and publishes it with claw's license as this repository's
+# runner, runs one real turn with it against a stand-in for the Anthropic API (tests/mock/anthropic.ts), and publishes it with claw's license as this repository's
 # release claw-<commit>, which scripts/windows-start.ps1 downloads and checks by SHA-256.
 name: claw-windows
 on:
   push:
     branches: ['claude/**', 'master']
-    paths: ['.github/workflows/claw-windows.yml']
+    paths: ['.github/workflows/claw-windows.yml', 'tests/mock/anthropic.ts']
   workflow_dispatch:
 permissions:
   contents: write
@@ -22,36 +22,38 @@ jobs:
         run: |
           git init claw; git -C claw remote add origin https://github.com/ultraworkers/claw-code
           git -C claw fetch --depth 1 origin $env:CLAW_COMMIT; git -C claw checkout FETCH_HEAD; git -C claw log -1 --format='%H %cd'
+      - uses: actions/checkout@v4  # this app, for its stand-in of the Anthropic API
+        with: { path: app }
+      - uses: actions/setup-node@v4  # the stand-in is TypeScript, which Node runs as it is from 22.18
+        with: { node-version: '24' }
       - uses: actions/cache@v4
         with: { path: 'claw/rust/target', key: 'claw-target-${{ env.CLAW_COMMIT }}' }
-      - name: Build claw.exe and claw's mock Anthropic service
+      - name: Build claw.exe
         shell: powershell
         working-directory: claw/rust
         run: |
           cargo --version
-          cargo build --release -p rusty-claude-cli -p mock-anthropic-service; if ($LASTEXITCODE) { throw 'cargo build failed' }
+          cargo build --release -p rusty-claude-cli; if ($LASTEXITCODE) { throw 'cargo build failed' }
           .\target\release\claw.exe --version
-      - name: One real turn on Windows, against the mock service
+      - name: One real turn on Windows, against a stand-in for the Anthropic API
         continue-on-error: true  # claw.exe is checked by --version above; this says whether a whole turn runs, and why not
         shell: powershell
         working-directory: claw/rust
         run: |
           $ErrorActionPreference = 'Continue'  # GitHub's powershell shell starts with Stop
           # no ErrorActionPreference Stop: Windows PowerShell turns a native command's stderr into an error; the checks below decide
-          $mock = Start-Process .\target\release\mock-anthropic-service.exe -ArgumentList '--bind', '127.0.0.1:4410' -PassThru -NoNewWindow -RedirectStandardOutput mock.log -RedirectStandardError mock.err
-          # whether the mock answers HTTP, not only TCP: the last run's claw got "error sending request" 9 times while the port had taken a connection
-          function Probe($when) { $r = curl.exe -s -m 5 -o NUL -w '%{http_code}' -X POST http://127.0.0.1:4410/v1/messages -H 'content-type: application/json' -d '{}' 2>&1; Write-Host "mock $when`: http=$r exited=$($mock.HasExited)$(if ($mock.HasExited) { " code=$($mock.ExitCode)" })"; Get-Content mock.err -ErrorAction SilentlyContinue }
+          # claw's own mock service took the connection on Windows but never answered (it closes on any request it cannot place, silently),
+          # and claw said "error sending request" nine times; the stand-in answers every request and logs each one on stderr
+          $mock = Start-Process node -ArgumentList "`"$env:GITHUB_WORKSPACE\app\tests\mock\anthropic.ts`"", '--port', '4410' -PassThru -NoNewWindow -RedirectStandardError mock.err
           $up = $false; for ($i = 0; $i -lt 30 -and -not $up; $i++) { Start-Sleep -Milliseconds 500; try { $c = New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 4410); $c.Close(); $up = $true } catch { } }
-          Write-Host "mock service: listening=$up exited=$($mock.HasExited) $(if ($mock.HasExited) { "code=$($mock.ExitCode)" })"; Get-Content mock.log -ErrorAction SilentlyContinue
-          if (-not $up) { throw 'the mock Anthropic service did not start on Windows' }
-          Start-Sleep 2; Probe 'before the turn'
+          if (-not $up) { Get-Content mock.err -ErrorAction SilentlyContinue; throw 'the stand-in did not start' }
           $env:ANTHROPIC_API_KEY = 'mock-key'; $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:4410'
           $env:NO_PROXY = '127.0.0.1,localhost'; $env:no_proxy = $env:NO_PROXY  # on Windows claw's HTTP client also takes the system's proxy settings
           $dir = Join-Path $env:RUNNER_TEMP 'clawproj'; New-Item -ItemType Directory -Force $dir | Out-Null; Push-Location $dir
-          $out = 'PARITY_SCENARIO:streaming_text hello from Windows' | & "$env:GITHUB_WORKSPACE\claw\rust\target\release\claw.exe" --output-format json --permission-mode workspace-write
-          Pop-Location; Probe 'after the turn'; taskkill /PID $mock.Id /T /F | Out-Null
+          $out = 'hello from Windows via stdin' | & "$env:GITHUB_WORKSPACE\claw\rust\target\release\claw.exe" --output-format json --permission-mode workspace-write
+          Pop-Location; taskkill /PID $mock.Id /T /F | Out-Null; Write-Host '--- what the stand-in received'; Get-Content mock.err
           Write-Host $out
-          if (-not ($out -match 'Mock streaming says hello')) { throw 'claw.exe did not answer' }
+          if (-not ($out -match 'Stand-in says hello: hello from Windows via stdin')) { throw 'claw.exe did not answer' }
           $doc = & .\target\release\claw.exe doctor --output-format json | ConvertFrom-Json; Write-Host "doctor auth: $(($doc.checks | Where-Object name -eq 'auth').status)"
       - name: Publish claw.exe as this repository's release
         shell: powershell
