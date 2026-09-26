@@ -41,6 +41,7 @@ else
     prep "$t" || continue
     flags=""; grep -q '^// needs: mic' "$t" && flags="--no-sandbox --use-fake-device-for-media-stream --use-fake-ui-for-media-stream"
     wav=$(sed -n 's|^// wav: ||p' "$t"); [ -n "$wav" ] && flags="$flags --use-file-for-fake-audio-capture=$ROOT/$wav%noloop"
+    flags="$flags ${CVC_ELECTRON_FLAGS:-}"  # e.g. --no-sandbox, which Electron needs when run as root (a Linux container, under xvfb-run)
     echo "== $name"; ran=$((ran+1))
     case "$t" in
       tests/window/*) env CVC_ZCODE_BIN="$NOZCODE" $envs CVC_HIDDEN=1 CVC_WHISPER_PORT=4331 CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" ./node_modules/.bin/electron . --remote-debugging-port=9341 $flags > "$DATA/app.log" 2>&1 & pid=$!
