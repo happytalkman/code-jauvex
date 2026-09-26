@@ -81,6 +81,9 @@ jobs:
             $env:Path = "$HOME\.local\bin;$env:Path"
             Check 'the browser agent (jev-ultrafast) is cloned and synced' ((Test-Path "$HOME\jev-ultrafast\pyproject.toml") -and (Test-Path "$HOME\jev-ultrafast\.venv")) ''
             $b = node scripts\browse.ts --url https://example.com --goal 'Open it' 2>&1 | Out-String; Check '... and without a TypeSafe key it says so' ($b -match 'needs a TypeSafe key') "$b"
+            # ... and it starts a Chrome of its own (its profile, port 9333), where browser-harness attaches
+            $eb = FromJson (node scripts\browse.ts --open | Out-String)
+            Check '... it starts a Chrome of its own, on its port, and it answers' ($eb.ok -and $eb.cdp -eq 'http://127.0.0.1:9333' -and "$($eb.browser)" -match 'Chrome|Edg') "$($eb | ConvertTo-Json -Compress)"
             $ErrorActionPreference = 'Stop'
             $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
             Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''

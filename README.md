@@ -134,7 +134,7 @@ HTTP API (`POST /v1/graphs/{graph}/query`, a bearer token, the `x-graph-namespac
 
 ## A browser agent for the agents (jev-ultrafast)
 
-[jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT, Browser Use with TypeSafe) drives the user's Chrome toward one goal:
+[jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT, Browser Use with TypeSafe) drives a Chrome window toward one goal:
 every observation turns the page into a numbered table of elements, TypeSafe's Jev picks the operation (click, type, select, scroll,
 wait, done, blocked) and its target in one request, and a small LLM writes text only when the operation is typing. Every agent can hand
 it a task: Claude sessions with the `browse` tool, any session with `node scripts/browse.ts --url <https://...> --goal "<goal>"`, and the
@@ -145,11 +145,17 @@ briefing says so (one narrow goal per run; check the last page it reports, since
   what the agent reads (how it ended, each step, the last page and the elements on it). Nothing of it is copied here.
 - Keys: TypeSafe's is the app's own (TYPESAFE_API_KEY or `~/.typesafe/token`, read by `shared/typesafe.ts` and passed in the run's
   environment only); the text model's (`TEXT_MODEL_API_KEY`, `TEXT_MODEL`, `TEXT_MODEL_BASE_URL`, an OpenRouter key in its example) is
-  in the clone's `.env`. Chrome: browser-harness connects to the running Chrome (allow remote debugging when Chrome asks), or to
-  `BU_CDP_URL`.
-- Checks: `tests/browse.test.ts` on a stand-in for uv (`tests/mock/uv`). The real runner was also driven here, in jev-ultrafast's own uv
+  in the clone's `.env`.
+- The browser (`ensureBrowser`): browser-harness only attaches to a browser already running, and the user's own Chrome takes it only
+  with `chrome://inspect`'s "Allow remote debugging" and a popup accepted every session (Chrome refuses a debugging port on its default
+  profile). So the agent gets a Chrome of its own, as browser-harness recommends: its own profile (`<home>/.jauvex/browser`, none of the
+  user's sign-ins; sign in there once where a task needs it), port 9333 on 127.0.0.1, started visibly on the first task and reused after.
+  Chrome, else Edge, else Chromium, where each system installs it (`CVC_CHROME_BIN` names another). `BU_CDP_URL` or `BU_CDP_WS`, when set,
+  name the browser instead; with no browser found, browser-harness looks for the user's own and says what it needs.
+- Checks: `tests/browse.test.ts` on stand-ins for uv and Chrome (`tests/mock/uv`, `tests/mock/chrome`). The real runner was also driven here, in jev-ultrafast's own uv
   environment, against a local page in headless Chromium (`BU_CDP_URL`): it connected, read the page and asked TypeSafe, which refused
-  the placeholder key (a real run needs the user's keys).
+  the placeholder key (a real run needs the user's keys). The same run through `ensureBrowser`, with a real Chromium (headless here: no
+  display) started on its own profile and port, got as far.
 
 ## Paperclip beside the app
 
