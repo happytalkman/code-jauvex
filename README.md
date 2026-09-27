@@ -468,6 +468,9 @@ Press the white round button in the message box. All local except the two Claude
   it works on any background); the last message rests just above it. The thread stays pinned to the bottom whatever
   grows (streamed text, a voice line being typed, a table rendering, the draft bubble, the orb appearing): only scrolling
   up lets go of the bottom.
+- **The orb without WebGL.** The orb is a WebGL shader (three.js). A browser that cannot make a WebGL context (a remote desktop,
+  a virtual machine, a PC without a GPU driver) once got a black window: the renderer threw and took the whole page with it. The
+  orb is then drawn flat, the disc and the mark standing still, and everything else works (`tests/window/no-webgl.test.ts`).
 - **Voice**: with no voice picked the app uses the system's default voice. (Samantha renders a line in a third of the
   time, 0.65 s against 1.9 s, but sounds robotic next to it; not worth it.) A half-finished thought is held 2.5 s for
   its second half, not 4.5.

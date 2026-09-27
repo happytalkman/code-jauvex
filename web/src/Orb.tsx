@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { VoicePhase } from './voice';
 
@@ -52,9 +52,13 @@ const ENERGY: Record<VoicePhase, number> = { off: 0.0, listening: 0.12, hearing:
 export function Orb({ size, level, phase, dim = false, mute = false, silent = false }: { size: number; level: React.RefObject<number>; phase: VoicePhase; dim?: boolean; mute?: boolean; silent?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const live = useRef({ phase, mute: mute || dim, silent: silent || dim }); live.current = { phase, mute: mute || dim, silent: silent || dim };
+  const [flat, setFlat] = useState(false); const maskId = `orb-under-${useId().replace(/:/g, '')}`;
   useEffect(() => {
-    const el = host.current; if (!el) return;
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: false });
+    const el = host.current; if (!el || flat) return;
+    let renderer: THREE.WebGLRenderer;
+    // No WebGL (a remote desktop, a virtual machine, no GPU driver): the renderer throws, and uncaught it took the whole window down
+    // with it (a black page). The orb is then drawn flat: the disc and the mark, still.
+    try { renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: false }); } catch { setFlat(true); return; }
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(size, size); renderer.setClearColor(0x000000, 0);
     el.appendChild(renderer.domElement);
     const uniforms = { uTime: { value: 0 }, uLevel: { value: 0 }, uEnergy: { value: 0.12 }, uMute: { value: 0 }, uSilent: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } };
@@ -72,6 +76,18 @@ export function Orb({ size, level, phase, dim = false, mute = false, silent = fa
     };
     raf = requestAnimationFrame(tick);
     return () => { cancelAnimationFrame(raf); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); renderer.dispose(); renderer.domElement.remove(); };
-  }, [size, level]);
-  return <div ref={host} className="orb-canvas" style={{ width: size, height: size }} />;
+  }, [size, level, flat]);
+  return (
+    <div ref={host} className="orb-canvas" style={{ width: size, height: size }}>
+      {flat && (
+        <svg className={`orb-flat${mute || dim ? ' mute' : ''}${silent || dim ? ' silent' : ''}`} viewBox="0 0 100 100" width={size} height={size} aria-hidden="true">
+          <defs><linearGradient id={`${maskId}-disc`} x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor="#131634" /><stop offset="1" stopColor="#292e5c" /></linearGradient>
+            <mask id={maskId}><rect width="100" height="100" fill="#fff" /><path d="M19 36.5C42 36.5 58 63.5 81 63.5" stroke="#000" strokeWidth="15" fill="none" /></mask></defs>
+          <circle className="disc" cx="50" cy="50" r="46.5" fill={`url(#${maskId}-disc)`} /><circle className="ring" cx="50" cy="50" r="45" />
+          <path className="strand under" mask={`url(#${maskId})`} d="M19 63.5C42 63.5 58 36.5 81 36.5" />
+          <path className="strand over" d="M19 36.5C42 36.5 58 63.5 81 63.5" />
+        </svg>
+      )}
+    </div>
+  );
 }

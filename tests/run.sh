@@ -6,7 +6,7 @@
 #             is in its part of the window (sh tests/run.sh <name>).
 # Header lines a check can carry:  // needs: mic (a fake microphone)  // wav: tests/fixtures/x.wav (what it hears, 48 kHz mono)
 #                                  // env: KEY=VALUE (__ROOT__ = this repository)   // fresh (empty data folder)
-#                                  // llm (calls a real model: skipped unless CVC_TEST_LLM=1)
+#                                  // llm (calls a real model: skipped unless CVC_TEST_LLM=1)   // flags: --x (Chromium switches for the app)
 cd "$(dirname "$0")/.." || exit 1; ROOT="$PWD"; mkdir -p tmp/scratch tmp/testrun
 QUICK=""; [ "$1" = --quick ] && { QUICK=1; shift; }
 fail=0; ran=0
@@ -41,7 +41,7 @@ else
     prep "$t" || continue
     flags=""; grep -q '^// needs: mic' "$t" && flags="--no-sandbox --use-fake-device-for-media-stream --use-fake-ui-for-media-stream"
     wav=$(sed -n 's|^// wav: ||p' "$t"); [ -n "$wav" ] && flags="$flags --use-file-for-fake-audio-capture=$ROOT/$wav%noloop"
-    flags="$flags ${CVC_ELECTRON_FLAGS:-}"  # e.g. --no-sandbox, which Electron needs when run as root (a Linux container, under xvfb-run)
+    flags="$flags $(sed -n 's|^// flags: ||p' "$t") ${CVC_ELECTRON_FLAGS:-}"  # e.g. --no-sandbox, which Electron needs when run as root (a Linux container, under xvfb-run)
     echo "== $name"; ran=$((ran+1))
     case "$t" in
       tests/window/*) env CVC_ZCODE_BIN="$NOZCODE" $envs CVC_HIDDEN=1 CVC_WHISPER_PORT=4331 CVC_DATA_DIR="$DATA" CVC_JAUVEX_HOME="$DATA/home" ./node_modules/.bin/electron . --remote-debugging-port=9341 $flags > "$DATA/app.log" 2>&1 & pid=$!

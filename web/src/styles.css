@@ -147,6 +147,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .voice-dock { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 2px 0 8px; }
 .orb-btn { border-radius: 50%; line-height: 0; transition: transform .2s; } .orb-btn:active { transform: scale(.97); }
 .orb-canvas { line-height: 0; } .orb-canvas canvas { display: block; }
+/* the orb without WebGL: the disc and the mark, still (Orb.tsx) */
+.orb-flat { display: block; } .orb-flat .ring { fill: none; stroke: #979dff; stroke-opacity: .35; stroke-width: 1.2; }
+.orb-flat .strand { fill: none; stroke-width: 7; stroke-linecap: round; } .orb-flat .over { stroke: #979dff; } .orb-flat .under { stroke: #ecebe3; }
+.orb-flat.mute .disc { filter: grayscale(1) brightness(.7); } .orb-flat.silent .strand { stroke: #9a9a96; }
 .dock-phase { margin: 6px 0 0; font-size: 13.5px; color: var(--muted); min-height: 20px; }
 .dock-heard { margin: 0; max-width: 640px; text-align: center; font-size: 13px; color: var(--faint); min-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voice-controls { position: relative; display: flex; align-items: center; justify-content: center; gap: 9px; margin: 0 0 12px; }
