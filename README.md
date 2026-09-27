@@ -540,8 +540,8 @@ Press the white round button in the message box. All local except the two Claude
   Jev agent" are caught before anything reaches the main thread: the voice says what it is doing, the agent opens in the
   folder you named (or the open one), and voice mode carries on there. A cheap word gate runs first, so ordinary speech
   pays nothing; then Jev settles whether it was an order for the app or a coding request that merely mentions agents,
-  which kind was meant (it knows Whisper writes Claude as "Cloud", Codex as "codecs", Jev as "Jeff" or "Jet") and which
-  folder. Without Jev the voice model reads the same things in one line (the COMMAND job), and a kind only counts when one
+  which kind was meant (it knows Whisper writes Claude as "Cloud", Codex as "codecs", Jev as "Jeff" or "Jet"; Claw is one of
+  its answers since "open a new claw agent" opened Claude, 2026-09-27) and which folder. Without Jev the voice model reads the same things in one line (the COMMAND job), and a kind only counts when one
   was actually said. **The app carries an order out on its own only when it is sure** (`shared/orders.ts`): the exact phrase
   ("restart the app"), or Jev at 0.85 or more. When nobody is sure (Jev leaning, unsure or absent, the voice model reading an
   order) it asks in one short line, shown and said ("Should I open a new agent in website? Say yes to open it; anything

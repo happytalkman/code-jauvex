@@ -12,6 +12,10 @@ export const JEV_SURE = 0.85;          // at or above this, Jev's word alone mak
  * "zed code", Jev as "Jeff", "Jet" or "Jab", and in Korean (클로드, 코덱스, 제트 코드, 클로, 제브: "클로" is Claw only when no "드" follows).
  * Claw and ZCode are looked for first: their words contain "claw" and "code". Null when none was named. */
 const AGENT_WORDS: ['zcode' | 'codex' | 'jev' | 'claude' | 'claw', RegExp][] = [['claw', /\b(claw|claws|clawcode|claw ?code)\b|클로(?!드)/i], ['zcode', /\b(z ?-?code|zed ?code|zee ?code|zhipu|glm)\b|(?:제트|지|즈|z)\s?코드|지엘엠/i], ['codex', /\b(codex|codecs|code ?x|kodex|chat ?gpt|open ?ai|gpt)\b|코덱스|코덱|챗\s?지피티|오픈\s?에이아이|지피티/i], ['jev', /\b(jev|jeff|jet|jab|jav|jeb|classifier)\b|제브|젭|분류기/i], ['claude', /\b(claude|cloud|clod|claud|clawed|anthropic)\b|클로드|클라우드|앤트로픽/i]];
+/** Jev's question for the kind of agent an order asks for: every provider has its answer (Claw had none until 2026-09-27, and "open a
+ * new claw agent" opened Claude, Jev's nearest pick at 0.97), with the ways speech-to-text writes each, Korean too. */
+export const AGENT_KIND_CHOICES = { type: 'choice' as const, instructions: 'Which kind of agent is asked for in `said`? Speech-to-text often writes Claude as "Cloud", Codex as "codecs", ZCode as "Z code" or "zed code", and Jev as "Jeff", "Jet" or "Jab". Claw and Claude are different agents: "claw" (Korean 클로) is Claw, "Claude" (Korean 클로드) is Claude.',
+  criteria: { claude: 'Claude (클로드), not Claw', codex: 'Codex, ChatGPT or OpenAI (코덱스)', zcode: 'ZCode (Z code, zed code, 제트 코드), GLM or Zhipu', claw: 'Claw, claw-code (클로), not Claude', jev: 'Jev, a classifier agent (제브)', unspecified: 'No kind was named' } };
 export const agentKindSaid = (text: string): 'zcode' | 'codex' | 'jev' | 'claude' | 'claw' | null => AGENT_WORDS.find(([, re]) => re.test(text))?.[0] ?? null;
 
 export type OrderVerdict = 'act' | 'ask' | 'pass';

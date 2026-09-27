@@ -7,7 +7,7 @@ import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-age
 import type { AppCommand, BusyTriage, CommandDetails, Provider, SetupCheck, Transcript, VoiceStatus } from '../shared/types.js';
 import { PROVIDER_LABEL, withAppWords } from '../shared/types.js';
 import { wakeMatch } from '../shared/transcript.js';
-import { JEV_MIN_CONFIDENCE, agentKindSaid, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked } from '../shared/orders.js';
+import { AGENT_KIND_CHOICES, JEV_MIN_CONFIDENCE, agentKindSaid, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked } from '../shared/orders.js';
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import * as claw from './claw.js';
@@ -558,7 +558,7 @@ export async function command(full: string, projects: { id: string; name: string
   const others = projects.filter((p) => p.id !== currentId);
   const r = await jev.decide({ said: full, open_folder: projects.find((p) => p.id === currentId)?.name ?? '', other_folders: others.map((p) => p.name) }, {
     target: { type: 'choice', instructions: 'A developer said `said` to a desktop app that manages their AI coding agents. Who is it for?', criteria: { app: 'An order for the app itself: open or create a new agent, session or chat', assistant: 'A request for the coding assistant to do or write something (even if it mentions agents), or anything else' } },
-    kind: { type: 'choice', instructions: 'Which kind of agent is asked for in `said`? Speech-to-text often writes Claude as "Cloud", Codex as "codecs", ZCode as "Z code" or "zed code", and Jev as "Jeff", "Jet" or "Jab".', criteria: { claude: 'Claude', codex: 'Codex, ChatGPT or OpenAI', zcode: 'ZCode (Z code, zed code), GLM or Zhipu', jev: 'Jev, a classifier agent', unspecified: 'No kind was named' } },
+    kind: AGENT_KIND_CHOICES,
     ...(others.length ? { folder: { type: 'choice' as const, instructions: 'In which folder should it be created, according to `said`? `open_folder` is the one on screen.', criteria: { __current: 'The open folder, "this project", "here", or no folder named', ...Object.fromEntries(others.slice(0, 40).map((p) => [p.id, `The folder named "${p.name}"`])) } } } : {}),
   }, 1000);
   // No Jev (no key, over budget, or unsure about the target): the voice model reads it too, in one line. What it reads is weighed with

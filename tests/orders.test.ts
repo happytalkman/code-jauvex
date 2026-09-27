@@ -1,5 +1,5 @@
 // When the app carries out an order said to it and when it asks first (shared/orders.ts).
-import { agentKindSaid, answerIs, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked, stopSaysMore } from '../shared/orders.ts';
+import { AGENT_KIND_CHOICES, agentKindSaid, answerIs, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked, stopSaysMore } from '../shared/orders.ts';
 let failed = 0; const check = (name: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` ${detail}` : ''}`); if (!ok) failed++; };
 
 // The case that opened a new agent nobody asked for: Jev leaned to the agent (0.55, not sure), the voice model read an order.
@@ -46,4 +46,6 @@ for (const [said, kind] of [['새 코덱스 에이전트', 'codex'], ['클로드
   check(`"${said}" names ${kind ?? 'no kind'}`, agentKindSaid(said) === kind, `got ${agentKindSaid(said)}`);
 for (const [said, answer] of [['네', 'yes'], ['응, 열어줘', 'yes'], ['그래 재시작해', 'yes'], ['좋아요', 'yes'], ['아니', 'no'], ['아니요, 에이전트한테 보내', 'no'], ['취소', 'no'], ['음 잘 모르겠는데', null]] as const)
   check(`"${said}" is ${answer ?? 'neither'}`, answerIs(said) === answer, `got ${answerIs(said)}`);
+// Jev's choice of kind had no Claw (2026-09-27): "Open a new claw agent here" and "클로 에이전트 새로 시작해" opened Claude (Jev: claude 0.97).
+check('Jev can answer every kind of agent: each provider, Jev, and none named', ['claude', 'codex', 'zcode', 'claw', 'jev', 'unspecified'].every((k) => k in AGENT_KIND_CHOICES.criteria), Object.keys(AGENT_KIND_CHOICES.criteria).join());
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);
