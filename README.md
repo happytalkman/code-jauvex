@@ -63,6 +63,11 @@ prints, `http://127.0.0.1:4343/?token=...`. Stop it with Ctrl+C; start it again 
 command lines first, as on a Mac (`claude auth login`, `codex login`; ZCode's `zcode` on the PATH). A folder is added by typing its
 path (a browser has no folder dialog); images are attached with the paperclip, pasted or dropped.
 
+**On a phone.** `CVC_WEB_LAN=1 npm run web` also listens on this computer's LAN addresses and prints, for each, the phone's link
+`http://<address>:4343/mobile?token=...`: open it on a phone on the same Wi-Fi. Every call still needs the token, and a Host that is not
+one of this machine's own addresses is still refused (`allowedHost` in `shared/web.ts`), but the token travels in plain HTTP on that
+network: use a trusted one. Off by default.
+
 How it works: the server answers the window's calls by the same channel names as the desktop app's IPC (`POST /rpc`) and sends what the
 main process would send to the window as server-sent events (`GET /events`); the window gets its `window.desktop` from
 `web/src/webDesktop.ts` instead of the preload. `tests/web.test.ts` keeps the two in step: every channel of `electron/preload.ts` must have

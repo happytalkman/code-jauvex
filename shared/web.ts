@@ -12,3 +12,8 @@ export const localHost = (host: string | undefined, port: number): boolean => !!
 export type B64 = { to: (bytes: Uint8Array) => string; from: (b64: string) => Uint8Array };
 export const packBinary = (v: unknown, b64: B64): unknown => (v instanceof ArrayBuffer ? { $ab: b64.to(new Uint8Array(v)) } : v);
 export const unpackBinary = (v: unknown, b64: B64): unknown => { if (!v || typeof v !== 'object' || typeof (v as { $ab?: unknown }).$ab !== 'string') return v; const u = b64.from((v as { $ab: string }).$ab); return u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength); };
+/** A request to this server from this machine (loopback) or, with the LAN switched on (CVC_WEB_LAN=1, for a phone on the same Wi-Fi),
+ *  to one of this machine's own LAN addresses, `lan`; always with this port. Any other Host is refused, as localHost does. */
+export const allowedHost = (host: string | undefined, port: number, lan: string[]): boolean => localHost(host, port) || (!!host && lan.some((ip) => host === `${ip}:${port}`));
+/** The links a phone opens: the mobile screen on each LAN address, with the token (it leaves the address bar once the page has it). */
+export const lanUrls = (lan: string[], port: number, token: string): string[] => lan.map((ip) => `http://${ip}:${port}/mobile?token=${token}`);

@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync,
 import { readFile } from 'node:fs/promises';
 import { DATA_DIR } from './paths.js';
 import type { Attachment, ChatEvent, ChatStart, DebugEvent, PermissionDecision, Provider } from '../shared/types.js';
-import { localHost, packBinary, rpcArgs, unpackBinary, type B64 } from '../shared/web.js';
+import { allowedHost, lanUrls, packBinary, rpcArgs, unpackBinary, type B64 } from '../shared/web.js';
 const b64: B64 = { to: (u) => Buffer.from(u).toString('base64'), from: (t) => new Uint8Array(Buffer.from(t, 'base64')) };
 
 const here = path.dirname(fileURLToPath(import.meta.url)); // dist-electron/
@@ -27,6 +27,10 @@ process.env.CVC_ROOT = ROOT; process.env.CVC_DATA_DIR = DATA_DIR;
 const PORT = Number(process.env.CVC_WEB_PORT || 4343);
 const TOKEN = process.env.CVC_WEB_TOKEN || randomBytes(18).toString('base64url');
 const OPEN = process.env.CVC_WEB_OPEN !== '0';
+// CVC_WEB_LAN=1: also on this machine's LAN addresses, for a phone on the same Wi-Fi (the mobile screen, /mobile, or the MARK Mobile
+// app). Off by default. The token is still needed for every call, but it travels in plain HTTP on that network: a trusted one only.
+const LAN = process.env.CVC_WEB_LAN === '1';
+const lanAddrs = (): string[] => (LAN ? Object.values(os.networkInterfaces()).flat().filter((a): a is os.NetworkInterfaceInfo => !!a && a.family === 'IPv4' && !a.internal).map((a) => a.address) : []);
 
 // ---------- one copy per data folder
 mkdirSync(DATA_DIR, { recursive: true });
@@ -150,7 +154,7 @@ const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.j
 const authorized = (req: http.IncomingMessage, url: URL): boolean => (req.headers['x-jauvex-token'] ?? url.searchParams.get('token')) === TOKEN;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  if (!localHost(req.headers.host, PORT)) { res.writeHead(421).end('Not this host.'); return; }
+  if (!allowedHost(req.headers.host, PORT, lanAddrs())) { res.writeHead(421).end('Not this host.'); return; }
   if (url.pathname === '/events') {
     if (!authorized(req, url)) { res.writeHead(401).end(); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' }); res.write(': hello\n\n');
@@ -170,13 +174,14 @@ const server = http.createServer((req, res) => {
     return;
   }
   // the built window: no token needed to load it (it holds nothing), every call it makes needs one
-  const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname); const file = path.normalize(path.join(DIST, rel));
+  const rel = decodeURIComponent(url.pathname === '/' || url.pathname === '/mobile' ? '/index.html' : url.pathname); /* /mobile: the same build, the phone's screen (web/src/Mobile.tsx) */ const file = path.normalize(path.join(DIST, rel));
   if (!file.startsWith(DIST + path.sep) || !existsSync(file) || statSync(file).isDirectory()) { res.writeHead(404).end('Not found. Build the window first: npm run web builds it.'); return; }
   res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' }).end(readFileSync(file));
 });
 server.on('error', (e: NodeJS.ErrnoException) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is taken: set CVC_WEB_PORT to another one.` : e.message); shutdown(); process.exit(1); });
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   const link = `http://127.0.0.1:${PORT}/?token=${TOKEN}`;
   console.log(`The app runs in your browser: ${link}\nData folder: ${DATA_DIR}\nStop it with Ctrl+C.`);
+  if (LAN) console.log(`On a phone on the same Wi-Fi (a trusted network only: the token travels in plain HTTP):\n${lanUrls(lanAddrs(), PORT, TOKEN).join('\n') || '(no LAN address found)'}`);
   if (OPEN) { const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', link]] : process.platform === 'darwin' ? ['open', [link]] : ['xdg-open', [link]]; try { spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* open it by hand */ } }
 });
