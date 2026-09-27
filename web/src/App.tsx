@@ -10,6 +10,7 @@ import typesafeMark from '../../assets/typesafe.png'; // TypeSafe's mark, on Jev
 import { Copy, EyeOff as HideIcon, Pencil, Bug, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Paperclip, Settings, Move, Keyboard, ChevronRight, Eye, EyeOff, FolderPlus, Folder, FolderOpen, Laptop, Mic, PanelLeft, Plus, RotateCw, Search, SlidersHorizontal, Settings2, Square, SquarePen, Trash2, Clapperboard, Briefcase, Globe, MicOff, Volume2, VolumeX, AudioLines, Wrench, Brain, X, Check, ShieldQuestion } from 'lucide-react';
 import { md } from './md';
 import { Pane, type PaneTarget } from './Pane';
+import { linesFor } from '../../shared/lines';
 import { findAgents, newAgentProvider, newChatProvider, shortIds, shortTitle } from '../../shared/roster';
 import { answerIs, stopSaysMore } from '../../shared/orders';
 import { opencutAddress, opencutUrl } from '../../shared/opencut';
@@ -870,7 +871,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
               setTimeout(() => { if (cmd.type === 'goodbye') { if (v.current.engine) void commands.current.toggleVoice(); } else cmdRef.current.onCommand?.(cmd, speaker.current.provider); }, wait + 150); return; }
             const busy = v.current.running; const prepared = spec && spec.busy === busy ? spec.ackAudio : undefined;
             if (!busy) { await sendRef.current(t.text, true, prepared); startAutoMute(); return; } /* always the latest send: the provider may have changed since voice started (the Jauvex agent moves) */
-            if (isStopCommand(t.text)) { setDraft(null); showStop(t.text); stopNow(); if (v.current.cfg.ack && !v.current.speakerOff) enqueue(say('Okay, stopped.'), v.current.gen); v.current.chain = v.current.chain.then(settle); settle(); return; }
+            if (isStopCommand(t.text)) { setDraft(null); showStop(t.text); stopNow(); if (v.current.cfg.ack && !v.current.speakerOff) enqueue(say(linesFor(t.text).stopped), v.current.gen); /* in the language the stop was said in */ v.current.chain = v.current.chain.then(settle); settle(); return; }
             // The main thread is mid-turn. Said out loud, this reaches it now, as added information: it keeps going and keeps everything it has.
             // It only waits when they ask for that ("queue this"), and only a clear "stop" or "not that, this" interrupts the work. (Typed text queues, with a Send now button.)
             const triage = spec && spec.busy && spec.triage ? spec.triage : window.desktop.triage(t.text, speaker.current.provider, speaker.current.model, main.current, v.current.asked).catch(() => null);

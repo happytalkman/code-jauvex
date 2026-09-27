@@ -7,6 +7,7 @@ import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-age
 import type { AppCommand, BusyTriage, CommandDetails, Provider, SetupCheck, Transcript, VoiceStatus } from '../shared/types.js';
 import { PROVIDER_LABEL, withAppWords } from '../shared/types.js';
 import { wakeMatch } from '../shared/transcript.js';
+import { linesFor } from '../shared/lines.js';
 import { AGENT_KIND_CHOICES, JEV_MIN_CONFIDENCE, agentKindSaid, byeAsked, byeOnly, farewellTone, holdAsked, holdOnly, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked } from '../shared/orders.js';
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
@@ -392,7 +393,7 @@ export function warmAck(provider: Provider, model: string): void {
  * and the summary of the answer when it lands (`summarize`).
  */
 export async function acknowledge(utterance: string): Promise<string> {
-  const t0 = Date.now(); const fast = (await jevQuestionLine(utterance)) ?? pick(['Okay, one second.', 'Sure, give me a moment.']);
+  const t0 = Date.now(); const fast = (await jevQuestionLine(utterance)) ?? pick(linesFor(utterance).ack.task.slice(0, 2));
   debug.log('ack', `"${fast}"  <- ${utterance}`, { by: 'jev', ms: Date.now() - t0 }); return fast;
 }
 /** The second line: what was understood, in the voice model's own words from the recent context. Empty when it has nothing in time. */
@@ -420,13 +421,6 @@ async function ackByModel(utterance: string, provider: Provider, model: string, 
 let lastPicked = '';
 /** One of the lines, never the one said last time (the user hears the repetition at once). */
 const pick = (xs: string[]): string => { const pool = xs.length > 1 ? xs.filter((x) => x !== lastPicked) : xs; const x = pool[Math.floor(Math.random() * pool.length)]!; lastPicked = x; return x; };
-const BUSY_LINES: Record<'task' | 'steer' | 'ask' | 'stop' | 'replace', string[]> = {
-  task: ["Okay, I'll queue that up.", "Got it, I'll keep that for right after this."],
-  steer: ['Okay, working on that now.', 'Got it, on it.', 'Sure, one moment.'],
-  ask: ["Good question, I'll answer that too.", 'Let me look at that as well.'],
-  stop: ["Okay, I'll take care of that right away, stopping now.", 'Okay, stopping now.'],
-  replace: ['Okay, switching to that right away.', 'Got it, dropping this and switching now.'],
-};
 async function jevTriage(utterance: string, task: string): Promise<BusyTriage | null> {
   const r = await jev.decide({ situation: "The assistant is in the middle of working on the user's previous request, `running_request`. The user just said `said` out loud.", running_request: task.slice(0, 600), said: utterance }, {
     action: { type: 'choice', instructions: 'What does the user want done with the work that is running right now? What they say is normally passed to the assistant at once, as added information, without interrupting its work.', criteria: {
@@ -439,7 +433,7 @@ async function jevTriage(utterance: string, task: string): Promise<BusyTriage | 
   const a = r?.answers.action, k = r?.answers.kind;
   if (!a || !k || a.confidence < JEV_MIN_CONFIDENCE) return null;
   const action = a.choice as BusyTriage['action']; if (action !== 'queue' && action !== 'steer' && action !== 'stop' && action !== 'replace') return null;
-  return { action, say: pick(BUSY_LINES[action === 'queue' ? 'task' : action === 'steer' && k.choice === 'question' ? 'ask' : action]), by: 'jev' };
+  return { action, say: pick(linesFor(utterance).busy[action === 'queue' ? 'task' : action === 'steer' && k.choice === 'question' ? 'ask' : action]), by: 'jev' };
 }
 
 // ---------- commands for the app itself, caught before anything reaches the main thread
@@ -467,16 +461,15 @@ function agentName(sentence: string): string | undefined {
 // A possible restart is Jev's to settle; the voice model's when Jev is not there, and then only as a question. Never the rule alone.
 async function restartMaybe(full: string, projects: { id: string; name: string }[], currentId: string, speaker?: { provider: Provider; model: string; main: string }): Promise<AppCommand | null> {
   if (!restartMaybeAsked(full)) return null;
-  const cmd: AppCommand = { type: 'restart-app', by: 'rule', say: 'Okay, restarting the app.' };
+  const lines = linesFor(full); const cmd: AppCommand = { type: 'restart-app', by: 'rule', say: lines.restart };
   const r = await jev.decide({ said: full }, { restart: { type: 'noul', instructions: 'A user said `said` to a desktop app in which they run AI coding agents. Is restarting or relaunching this desktop app the only thing they ask? When they also ask for other work (publish, commit, build, fix, check...), the answer is No: the assistant does that work and restarts the app itself.', criteria: { true: 'Yes: only a restart, relaunch or reload of the app, the application, the program, and nothing else', false: 'No: a restart together with other work to do, or it is about a server, a service, a process or a device in their project, or a question, or something else' } } }, 1000);
-  if (r?.answers.restart) { const p = r.answers.restart.noul; const v = orderVerdict({ jev: { forApp: p >= 0.5, confidence: Math.max(p, 1 - p) } }); debug.log('note', `restart of the app meant: ${p.toFixed(2)}${v === 'ask' ? ', not sure: asking first' : ''}  <- ${full}`, { by: 'jev', ms: r.ms }); return v === 'act' ? cmd : v === 'ask' ? confirmOrder(cmd, full, RESTART_QUESTION) : null; }
+  if (r?.answers.restart) { const p = r.answers.restart.noul; const v = orderVerdict({ jev: { forApp: p >= 0.5, confidence: Math.max(p, 1 - p) } }); debug.log('note', `restart of the app meant: ${p.toFixed(2)}${v === 'ask' ? ', not sure: asking first' : ''}  <- ${full}`, { by: 'jev', ms: r.ms }); return v === 'act' ? cmd : v === 'ask' ? confirmOrder(cmd, full, linesFor(full).restartQuestion) : null; }
   if (!speaker) return null;
   const others = projects.filter((p) => p.id !== currentId); const t1 = Date.now();
   const out = await ask(`MAIN: ${speaker.main}\nFOLDERS: open: ${projects.find((p) => p.id === currentId)?.name ?? ''}; others: ${others.map((p) => p.name).join(', ') || '(none)'}\nCOMMAND: ${full}`, speaker.provider, speaker.model, 4500);
   debug.log('note', `restart of the app meant? the voice model says: ${out.trim() || '(nothing)'}  <- ${full}`, { by: 'voice model', ms: Date.now() - t1 });
-  return /^\W*RESTART\b/i.test(out.trim()) ? confirmOrder(cmd, full, RESTART_QUESTION) : null; // the voice model alone is never sure enough
+  return /^\W*RESTART\b/i.test(out.trim()) ? confirmOrder(cmd, full, linesFor(full).restartQuestion) : null; // the voice model alone is never sure enough
 }
-const RESTART_QUESTION = 'Restart the app? It stops every turn that is running. Say yes to restart; anything else goes to the agent as you said it.';
 /** An order nobody is sure of becomes a question (shared/orders.ts): a clear yes carries it out, anything else goes to the agent. */
 const confirmOrder = (cmd: AppCommand, text: string, question: string): AppCommand => ({ type: 'confirm', pending: cmd, text, say: question, by: cmd.by });
 /**
@@ -518,7 +511,7 @@ async function detailsByModel(full: string, projects: { id: string; name: string
    The gates, English and Korean ("잘 자", "이따 봐"): shared/orders.ts. */
 async function holding(full: string): Promise<AppCommand | null> {
   if (!holdAsked(full)) return null;
-  const say = pick(['Sure, take your time.', "Okay, I'm here.", 'Take your time.', 'Of course, no rush.']);
+  const say = pick(linesFor(full).hold);
   const r = await jev.decide({ said: full }, { pausing: { type: 'noul', instructions: 'A person is talking to an assistant by voice and just said `said`. Are they only asking the assistant to wait (they are pausing, thinking, or about to say more), with nothing in it for the assistant to do or answer yet?', criteria: { true: 'Yes: one second, wait, hold on, let me think, not yet, and nothing else of substance', false: 'No: there is a task, a question, a correction or a message in it ("wait, make it blue", "one second, what did you say?"), or the words are used in passing' } } }, 900);
   if (r?.answers.pausing) { const p = r.answers.pausing.noul; debug.log('note', `a pause, not a message? ${p.toFixed(2)}  <- ${full}`, { by: 'jev', ms: r.ms }); return p >= 0.6 ? { type: 'hold', by: 'jev', say } : null; }
   if (holdOnly(full)) { debug.log('note', `a pause, not a message (by the words alone)  <- ${full}`, { by: 'rule' }); return { type: 'hold', by: 'rule', say }; }
@@ -526,7 +519,7 @@ async function holding(full: string): Promise<AppCommand | null> {
 }
 async function farewell(full: string): Promise<AppCommand | null> {
   if (!byeAsked(full)) return null; const tone = farewellTone(full);
-  const say = tone === 'night' ? pick(['Good night, sleep well.', 'Good night. I will be here when you are back.']) : tone === 'back' ? pick(["Sure, I'll be here. Talk later.", 'Okay, see you in a bit.']) : pick(['Bye for now.', 'Goodbye, talk soon.', 'See you later.']);
+  const say = pick(linesFor(full).bye[tone]);
   // Two questions: is it a goodbye at all, and is there something to do first ("set the alarm for eight, then bye")?
   const r = await jev.decide({ said: full }, {
     farewell: { type: 'noul', instructions: 'A person is talking to an assistant by voice and just said `said`. Are they saying goodbye or ending the conversation for now (as opposed to mentioning these words in passing)?', criteria: { true: 'Yes: bye, good night, talk later, be right back, that is all for now', false: 'No: the words are part of a request, a story or a question' } },
@@ -539,8 +532,8 @@ async function farewell(full: string): Promise<AppCommand | null> {
 export async function command(full: string, projects: { id: string; name: string; path?: string }[], currentId: string, speaker?: { provider: Provider; model: string; main: string; mainModel?: string }): Promise<AppCommand | null> {
   const hold = await holding(full); if (hold) return hold;
   const bye = await farewell(full); if (bye) return bye;
-  if (full.split(/(?<=[.!?])\s+/).some(reloadAsked)) { debug.log('note', `app command: reload the interface  <- ${full}`, { by: 'rule' }); return { type: 'reload-ui', by: 'rule', say: 'Okay, reloading the interface.' }; }
-  if (restartAsked(full)) { debug.log('note', `app command: restart  <- ${full}`, { by: 'rule' }); return { type: 'restart-app', by: 'rule', say: 'Okay, restarting the app.' }; }
+  if (full.split(/(?<=[.!?])\s+/).some(reloadAsked)) { debug.log('note', `app command: reload the interface  <- ${full}`, { by: 'rule' }); return { type: 'reload-ui', by: 'rule', say: linesFor(full).reload }; }
+  if (restartAsked(full)) { debug.log('note', `app command: restart  <- ${full}`, { by: 'rule' }); return { type: 'restart-app', by: 'rule', say: linesFor(full).restart }; }
   // The order may follow a few words of something else ("Okay, let's see if this works. Make a new Codex agent."): it is looked
   // for sentence by sentence. With more than one sentence it takes Jev's word that this is for the app (or the rest being small talk).
   const sentences = full.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean); const at = sentences.findIndex((x) => x.split(/\s+/).length <= 22 && newAgentAsked(x));
@@ -568,7 +561,7 @@ export async function command(full: string, projects: { id: string; name: string
       if (m) {
         const verb = m[1]!.toUpperCase();
         if (verb === 'NONE') { debug.log('note', `not an app command, it is for the main thread: ${full}`, { by: 'voice model', ms: Date.now() - t1 }); return null; }
-        if (verb === 'RESTART') { debug.log('note', `the voice model read a restart, nobody sure: asking first  <- ${full}`, { by: 'voice model', ms: Date.now() - t1 }); return confirmOrder({ type: 'restart-app', by: 'rule', say: 'Okay, restarting the app.' }, full, RESTART_QUESTION); }
+        if (verb === 'RESTART') { debug.log('note', `the voice model read a restart, nobody sure: asking first  <- ${full}`, { by: 'voice model', ms: Date.now() - t1 }); return confirmOrder({ type: 'restart-app', by: 'rule', say: linesFor(full).restart }, full, linesFor(full).restartQuestion); }
         modelSays = 'order';
         const kind = (m[2] ?? 'any').toLowerCase(); if (kind !== 'any' && (byWord || /\b(jev|jeff|jet|jab|chatgpt|openai|gpt)\b/i.test(full))) provider = kind as Provider | 'jev'; // a kind only counts when one was said: the model likes to answer with the MAIN provider
         const folder = (m[3] ?? '').trim().toLowerCase(); if (folder && folder !== 'here') { const f = others.find((p) => norm(p.name) === norm(folder) || words(p.name).some((w) => norm(folder).includes(w))); if (f) projectId = f.id; }
@@ -579,14 +572,13 @@ export async function command(full: string, projects: { id: string; name: string
   if (r) { const a = r.answers; if (a.target?.choice === 'assistant' && a.target.confidence >= JEV_MIN_CONFIDENCE) { debug.log('note', `not an app command, it is for the main thread: ${text}`, { by: 'jev', ms: r.ms }); return null; }
     by = 'jev'; if (a.kind && a.kind.confidence >= JEV_MIN_CONFIDENCE && a.kind.choice !== 'unspecified') provider = a.kind.choice as Provider | 'jev';
     if (!named && a.folder && a.folder.confidence >= JEV_MIN_CONFIDENCE && a.folder.choice !== '__current') projectId = a.folder.choice; }
-  const where = projects.find((p) => p.id === (projectId ?? currentId))?.name ?? 'this folder'; const what = provider === 'jev' ? 'Jev' : provider ? PROVIDER_LABEL[provider] : '';
+  const lines = linesFor(full); const where = projects.find((p) => p.id === (projectId ?? currentId))?.name ?? null; const what = provider ? lines.kinds[provider] : ''; // said in the language of the order (shared/lines.ts)
   let name = agentName(text); let purpose = agentPurpose(text, name); let kickoff: string | undefined;
   const target = r?.answers.target; const verdict = orderVerdict({ jev: target ? { forApp: target.choice === 'app', confidence: target.confidence } : null, model: modelSays });
   if (verdict !== 'act') { const how = `${target ? `Jev: ${target.choice} ${target.confidence.toFixed(2)}` : 'no Jev'}${modelSays ? `, voice model: ${modelSays}` : ''}`;
     if (verdict === 'pass') { debug.log('note', `not an app command (${how}): it is for the main thread  <- ${text}`, { by, ms: Date.now() - t0 }); return null; }
     debug.log('note', `maybe an order for the app, nobody sure (${how}): asking first  <- ${text}`, { by, ms: Date.now() - t0 });
-    return confirmOrder({ type: 'new-agent', provider, projectId, ...(name ? { name } : {}), ...(purpose ? { purpose } : {}), by, say: `Opening a new ${what ? `${what} ` : ''}agent${name ? ` named ${name}` : ''} in ${where}.` }, full,
-      `Should I open a new ${what ? `${what} ` : ''}agent in ${where}? Say yes to open it; anything else goes to the agent as you said it.`); }
+    return confirmOrder({ type: 'new-agent', provider, projectId, ...(name ? { name } : {}), ...(purpose ? { purpose } : {}), by, say: lines.newAgent(what, name, where) }, full, lines.newAgentQuestion(what, where)); }
   // The agent opens at once with what Jev and the rules found; the session's model reads the order in the background and its
   // details (the name as a person would title it, the purpose, the first message it wrote) reach the window a few seconds later.
   const detailsId = speaker ? randomUUID() : undefined;
@@ -597,8 +589,8 @@ export async function command(full: string, projects: { id: string; name: string
       if (typeof d.kickoff === 'string' && d.kickoff.trim().length >= 40) out.kickoff = d.kickoff.trim(); }
     detailsSink(out);
   }).catch(() => detailsSink({ id: detailsId }));
-  const cmd: AppCommand = { type: 'new-agent', provider, projectId, ...(name ? { name } : {}), ...(purpose ? { purpose } : {}), ...(kickoff ? { kickoff } : {}), ...(detailsId ? { detailsId } : {}), by, say: `Opening a new ${what ? `${what} ` : ''}agent${name ? ` named ${name}` : ''} in ${where}.` };
-  debug.log('note', `app command: new ${what || 'default'} agent${name ? ` named "${name}"` : ''}${purpose ? ` about "${purpose}"` : ''} in ${where}  <- ${text}`, { by, ms: Date.now() - t0 }); return cmd;
+  const cmd: AppCommand = { type: 'new-agent', provider, projectId, ...(name ? { name } : {}), ...(purpose ? { purpose } : {}), ...(kickoff ? { kickoff } : {}), ...(detailsId ? { detailsId } : {}), by, say: lines.newAgent(what, name, where) };
+  debug.log('note', `app command: new ${what || 'default'} agent${name ? ` named "${name}"` : ''}${purpose ? ` about "${purpose}"` : ''} in ${where ?? 'the open folder'}  <- ${text}`, { by, ms: Date.now() - t0 }); return cmd;
 }
 
 /** Is the thought finished? Jev answers from the words alone, in about a quarter of a second. Without Jev: yes, as before. */
@@ -616,13 +608,13 @@ async function jevQuestionLine(utterance: string): Promise<string | null> {
   }, 900);
   const k = r?.answers.kind;
   if (!k || k.confidence < JEV_MIN_CONFIDENCE) return null;
-  if (k.choice === 'problem') return pick(['Oh, okay, let me check.', "That's strange, let me look.", 'Hmm, let me see what happened.', "That shouldn't happen, let me look."]); // concern, never cheer: a problem is not a task to be glad about
-  if (k.choice === 'question') return pick(['Let me check.', 'Good question, one second.', 'Let me look at that.', 'One moment, checking.']);
-  if (k.choice === 'thanks') return pick(['Happy to help.', 'Anytime.', 'Glad you like it.']);
+  const lines = linesFor(utterance).ack; // in the language it was said in (shared/lines.ts)
+  if (k.choice === 'problem') return pick(lines.problem); // concern, never cheer: a problem is not a task to be glad about
+  if (k.choice === 'question') return pick(lines.question);
+  if (k.choice === 'thanks') return pick(lines.thanks);
   // A task or a remark too: a fixed line in a quarter of a second beats a worded one in a second and a half. The voice
   // model only words the acknowledgment when Jev is not there or not sure.
-  if (k.choice === 'task') return pick(['Okay, one second.', 'Sure, give me a moment.', 'Got it, one moment.', 'Sure, one moment.']);
-  return pick(['Okay, one second.', 'Mmm, let me think.', 'Sure, give me a moment.']); // never a single word: it sounds like a brush-off
+  return pick(k.choice === 'task' ? lines.task : lines.other); // never a single word: it sounds like a brush-off
 }
 
 /** Said out loud while the main thread works. By voice it is handed to the running turn at once (steer), without interrupting it; it only waits when they ask for that, and the work is only stopped or replaced when they clearly say so. Doubt means steer. */
@@ -636,9 +628,10 @@ async function triageByModel(utterance: string, provider: Provider, model: strin
   const m = /^\W*(QUEUE|STEER|STOP|REPLACE)\W*[:\-\u2014]\s*([\s\S]*)$/i.exec(out);
   if (!m) { debug.log('busy', `the voice model gave no action word, so it is passed along as it is: ${JSON.stringify(out.slice(0, 120))}`, { by: 'voice model' }); return { action: 'steer', say: out }; }
   let action = m[1]!.toLowerCase() as BusyTriage['action']; let line = m[2]!.trim();
-  if (LABELS.test(line) || line.split(/\s+/).length > 30) line = action === 'stop' ? 'Okay, stopping now.' : action === 'replace' ? 'Okay, switching to that right away.' : action === 'queue' ? "Okay, I'll queue that up." : 'Okay, working on that now.';
+  const busy = linesFor(utterance).busy; // the fixed lines in the language it was said in
+  if (LABELS.test(line) || line.split(/\s+/).length > 30) line = (action === 'queue' ? busy.task : busy[action])[0]!;
   // The app acts on the word, the user hears the line: they must not disagree. A line that announces a stop under QUEUE is replaced, not obeyed.
-  if ((action === 'queue' || action === 'steer') && /\b(stopping|stopped|cancel+ing|deteni|cancelando|switching)\b/i.test(line)) line = 'Okay, working on that now.';
+  if ((action === 'queue' || action === 'steer') && (/\b(stopping|stopped|cancel+ing|deteni|cancelando|switching)\b/i.test(line) || /멈출|멈춰|멈췄|중단|취소할|바꿀게|그만두/.test(line))) line = busy.steer[0]!;
   return { action, say: line };
 }
 /** What to say about the big model's finished answer. Long answers are sent head and tail; the voice only needs the gist. */
