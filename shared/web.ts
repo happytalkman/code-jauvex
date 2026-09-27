@@ -17,3 +17,6 @@ export const unpackBinary = (v: unknown, b64: B64): unknown => { if (!v || typeo
 export const allowedHost = (host: string | undefined, port: number, lan: string[]): boolean => localHost(host, port) || (!!host && lan.some((ip) => host === `${ip}:${port}`));
 /** The links a phone opens: the mobile screen on each LAN address, with the token (it leaves the address bar once the page has it). */
 export const lanUrls = (lan: string[], port: number, token: string): string[] => lan.map((ip) => `http://${ip}:${port}/mobile?token=${token}`);
+/** Is the LAN wanted: CVC_WEB_LAN=1, or --lan on the command line (`npm run web:lan`: Windows' cmd cannot put a variable in front of a
+ *  command, and "CVC_WEB_LAN=1 npm run web" is an error there). */
+export const lanWanted = (env: Record<string, string | undefined>, argv: string[]): boolean => env.CVC_WEB_LAN === '1' || argv.includes('--lan');

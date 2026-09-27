@@ -63,8 +63,10 @@ prints, `http://127.0.0.1:4343/?token=...`. Stop it with Ctrl+C; start it again 
 command lines first, as on a Mac (`claude auth login`, `codex login`; ZCode's `zcode` on the PATH). A folder is added by typing its
 path (a browser has no folder dialog); images are attached with the paperclip, pasted or dropped.
 
-**On a phone.** `CVC_WEB_LAN=1 npm run web` also listens on this computer's LAN addresses and prints, for each, the phone's link
-`http://<address>:4343/mobile?token=...`: open it on a phone on the same Wi-Fi. Every call still needs the token, and a Host that is not
+**On a phone.** `npm run web:lan` (or `CVC_WEB_LAN=1 npm run web` on a Mac; Windows' cmd cannot set a variable that way) also listens
+on this computer's LAN addresses and prints, for each, the phone's link `http://<address>:4343/mobile?token=...` with its network's name
+(Windows lists virtual ones too, WSL or Hyper-V: take the Wi-Fi's): open it on a phone on the same Wi-Fi. On Windows, allow Node.js
+through the firewall on private networks and set the Wi-Fi as a private network. No app to install: the phone's browser is enough. Every call still needs the token, and a Host that is not
 one of this machine's own addresses is still refused (`allowedHost` in `shared/web.ts`), but the token travels in plain HTTP on that
 network: use a trusted one. Off by default.
 

@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync,
 import { readFile } from 'node:fs/promises';
 import { DATA_DIR } from './paths.js';
 import type { Attachment, ChatEvent, ChatStart, DebugEvent, PermissionDecision, Provider } from '../shared/types.js';
-import { allowedHost, lanUrls, packBinary, rpcArgs, unpackBinary, type B64 } from '../shared/web.js';
+import { allowedHost, lanUrls, lanWanted, packBinary, rpcArgs, unpackBinary, type B64 } from '../shared/web.js';
 const b64: B64 = { to: (u) => Buffer.from(u).toString('base64'), from: (t) => new Uint8Array(Buffer.from(t, 'base64')) };
 
 const here = path.dirname(fileURLToPath(import.meta.url)); // dist-electron/
@@ -27,10 +27,11 @@ process.env.CVC_ROOT = ROOT; process.env.CVC_DATA_DIR = DATA_DIR;
 const PORT = Number(process.env.CVC_WEB_PORT || 4343);
 const TOKEN = process.env.CVC_WEB_TOKEN || randomBytes(18).toString('base64url');
 const OPEN = process.env.CVC_WEB_OPEN !== '0';
-// CVC_WEB_LAN=1: also on this machine's LAN addresses, for a phone on the same Wi-Fi (the mobile screen, /mobile, or the MARK Mobile
+// CVC_WEB_LAN=1 or --lan (npm run web:lan, which works on Windows too): also on this machine's LAN addresses, for a phone on the same Wi-Fi (the mobile screen, /mobile, or the MARK Mobile
 // app). Off by default. The token is still needed for every call, but it travels in plain HTTP on that network: a trusted one only.
-const LAN = process.env.CVC_WEB_LAN === '1';
-const lanAddrs = (): string[] => (LAN ? Object.values(os.networkInterfaces()).flat().filter((a): a is os.NetworkInterfaceInfo => !!a && a.family === 'IPv4' && !a.internal).map((a) => a.address) : []);
+const LAN = lanWanted(process.env, process.argv);
+const lanNamed = (): { name: string; address: string }[] => (LAN ? Object.entries(os.networkInterfaces()).flatMap(([name, list]) => (list ?? []).filter((a) => a.family === 'IPv4' && !a.internal).map((a) => ({ name, address: a.address }))) : []);
+const lanAddrs = (): string[] => lanNamed().map((a) => a.address);
 
 // ---------- one copy per data folder
 mkdirSync(DATA_DIR, { recursive: true });
@@ -182,6 +183,7 @@ server.on('error', (e: NodeJS.ErrnoException) => { console.error(e.code === 'EAD
 server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
   const link = `http://127.0.0.1:${PORT}/?token=${TOKEN}`;
   console.log(`The app runs in your browser: ${link}\nData folder: ${DATA_DIR}\nStop it with Ctrl+C.`);
-  if (LAN) console.log(`On a phone on the same Wi-Fi (a trusted network only: the token travels in plain HTTP):\n${lanUrls(lanAddrs(), PORT, TOKEN).join('\n') || '(no LAN address found)'}`);
+  // each link with its network's name: Windows has virtual ones too (WSL, Hyper-V), and only the Wi-Fi one reaches the phone
+  if (LAN) console.log(`On a phone on the same Wi-Fi (a trusted network only: the token travels in plain HTTP), the link of your Wi-Fi:\n${lanNamed().map((a) => `  ${lanUrls([a.address], PORT, TOKEN)[0]}   (${a.name})`).join('\n') || '  (no LAN address found)'}${process.platform === 'win32' ? '\nWindows may ask whether Node.js may use the network: allow it on private networks, and set your Wi-Fi as a private network.' : ''}`);
   if (OPEN) { const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', link]] : process.platform === 'darwin' ? ['open', [link]] : ['xdg-open', [link]]; try { spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* open it by hand */ } }
 });
