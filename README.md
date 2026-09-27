@@ -489,7 +489,7 @@ Press the white round button in the message box. All local except the two Claude
   voice says it will wait ("Take your time.", "Okay, I'm here.") and the next thing said is a message as usual, whether
   the agent is idle or working (a pause is never steered into a turn). Jev tells a pause from "wait, make it blue" (a
   task) or "one second, what did you say?" (a question); without Jev only the bare phrase counts. Typed, "wait" is a
-  message like any other.
+  message like any other. In Korean too: "잠깐만", "잠시만요, 생각 좀 해볼게요", "기다려 줘" (and "잠깐, 파란색으로 바꿔" is a task).
 - **Preparing the reply.** When the agent's answer is in and the voice is putting its summary into words and rendering
   it, the orb and its label say so ("Preparing the reply"), so the pause before the voice speaks is not taken for silence.
 - **Goodbye.** "Bye", "good night", "talk to you later", "I'll be back": the voice answers in kind ("Good night, sleep
@@ -497,6 +497,10 @@ Press the white round button in the message box. All local except the two Claude
   passing ("add a goodbye message to the login page" is not one), and whether there is something to do first: "set an
   alarm for eight, then bye" goes to the main thread as a normal message, and the goodbye comes once that turn is over,
   after the summary. Without Jev, a short farewell counts by its words alone, a longer one is taken as having a task in it.
+  In Korean too: "잘 자", "안녕히 계세요", "이따 봐", "오늘은 여기까지 하자" (not "안녕" alone: it is also hello). Korean says in three
+  words what English says in seven, so without Jev a Korean goodbye is only a goodbye when nothing but goodbye, thanks and filler
+  is left ("커밋하고 잘 자" goes through first). Jev is told that wrapping up ("오늘은 여기까지 하자") is part of the goodbye, not a
+  task: it had read it as one at 0.5. The gates are in `shared/orders.ts`. The lines the voice says back stay English.
 - **Speaker** (voice settings): which output device the voice comes out of, with a Test line. A screen recorder or a
   virtual audio device can leave the system default somewhere you cannot hear; the audio context is also resumed
   before every line, because another app taking the audio can leave it suspended.

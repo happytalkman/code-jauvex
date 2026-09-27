@@ -74,3 +74,33 @@ export const reloadAsked = (sentence: string): boolean => {
   const x = sentence.replace(/^\W*(?:(?:yeah|yes|okay|ok|and|so|obviously|now|then|also|please|just)\b\W*)+/i, '');
   return (x.split(/\s+/).length <= 10 && RELOAD_GATE.test(x)) || RELOAD_GATE_KO.test(sentence.trim());
 };
+
+// ---------- a pause and a goodbye (electron/voice.ts: holding, farewell): the gate lets a short utterance reach Jev, which tells a
+// pause from "wait, make it blue" and a goodbye from a story; without Jev only the bare phrase counts (holdOnly, a short goodbye).
+// English as before, and Korean: 2026-09-27, "잠깐만" and "잘 자" went to the agent as messages.
+const HOLD_WORDS = /\b(?:one|a|just a|give me a|gimme a)\s+(?:sec|second|moment|minute|min)\b|\b(?:hold on|hang on|wait|standby|stand by|not yet|let me think|one moment)\b/i;
+const HOLD_WORDS_KO = /잠깐|잠시|기다려|생각\s*좀|생각해\s*볼게|아직이|있어\s*봐/;
+/** Might this be a pause ("one second", "잠깐만")? Only a gate: Jev decides, or holdOnly without it. */
+export const holdAsked = (full: string): boolean => full.split(/\s+/).length <= 10 && (HOLD_WORDS.test(full) || HOLD_WORDS_KO.test(full));
+const HOLD_ONLY = /^(?:(?:one|a|just a|give me a|gimme a)\s+(?:sec|second|moment|minute|min)|hold on|hang on|wait|wait (?:a (?:sec|second|moment|minute|bit)|up)|standby|stand by|not yet|let me think|one moment|hold on a (?:sec|second|moment|minute))$/i;
+const KO_PLEASE = '(?:요|\\s?줘|\\s?줘요|\\s?주세요|\\s?줄래)?';
+const HOLD_PHRASE_KO = `(?:잠깐만?요?|잠시만?요?|(?:잠깐|잠시만?)\\s*기다려${KO_PLEASE}|기다려${KO_PLEASE}|생각\\s*좀\\s*(?:해\\s*볼게|할게)요?|아직이(?:야|에요|요)?|있어\\s*봐요?|가만\\s*있어\\s*봐요?)`;
+const HOLD_ONLY_KO = new RegExp(`^(?:(?:어|음|아|자|좀|네|응)\\s+)*${HOLD_PHRASE_KO}(?:\\s+${HOLD_PHRASE_KO})*$`); // "잠시만요, 생각 좀 해볼게요": one pause, said twice
+/** Only a pause and nothing else, by the words alone (no Jev): "wait", "one second", "잠깐만", "잠시만 기다려 줘". */
+export const holdOnly = (text: string): boolean => {
+  const bare = text.trim().replace(/^\W*(?:(?:yeah|yes|okay|ok|oh|um|uh|hmm|so|and|please|just|now)\b\W*)+/i, '').replace(/[.,!?…\s]+$/, '').trim();
+  return HOLD_ONLY.test(bare) || HOLD_ONLY_KO.test(bare.replace(/[,，]/g, ''));
+};
+const BYE_GATE = /\b(bye|goodbye|good ?night|see you|see ya|talk (?:to you )?later|talk later|catch you later|i'?ll be back|be right back|be back later|that'?s all for now|until next time|later then)\b/i;
+// 잘 자 / 안녕히 계세요 / 이따 봐 / 나중에 얘기하자 / 오늘은 여기까지 / 곧 돌아올게. Not "안녕" alone: it is also hello. Not "수고했어": also praise.
+const BYE_GATE_KO = /잘\s*자|안녕히\s*(?:계세요|계십시오|주무세요|가세요)|굿\s*나잇|바이\s*바이|(?:이따|나중에|다음에)\s*(?:봐|보자|얘기|이야기|다시|만나)|또\s*(?:봐|보자|만나)|오늘은\s*여기까지|여기까지\s*(?:하자|할게)|(?:곧|금방)\s*(?:돌아올게|올게)|다녀올게/;
+/** Might this be a goodbye ("bye", "잘 자")? Only a gate: Jev decides, or a short one by the words alone. */
+export const byeAsked = (full: string): boolean => full.split(/\s+/).length <= 12 && (BYE_GATE.test(full) || BYE_GATE_KO.test(full));
+/** Which goodbye it is, for the line the voice says back: good night, back later, or a plain bye. */
+export const farewellTone = (full: string): 'night' | 'back' | 'bye' =>
+  /good ?night|잘\s*자|안녕히\s*주무세요|굿\s*나잇/i.test(full) ? 'night' : /be (?:right )?back|later|이따|나중에|다음에|돌아올게|금방\s*올게|다녀올게/i.test(full) ? 'back' : 'bye';
+// What a Korean goodbye may hold besides itself and still be only a goodbye: thanks, "그럼", "오늘은 여기까지", "내일 봐".
+const BYE_ONLY_KO = /잘\s*자요?|안녕히\s*(?:계세요|계십시오|주무세요|가세요)|굿\s*나잇|바이\s*바이|좋은\s*밤(?:\s*되세요|\s*보내)?|(?:이따|나중에|다음에|내일)\s*(?:다시\s*)?(?:봐요?|보자|봬요|만나요?|얘기해요?|얘기하자|이야기하자)|또\s*(?:봐요?|보자|만나요?)|오늘은\s*여기까지(?:\s*(?:하자|할게요?|야|요))?|여기까지\s*(?:하자|할게요?)|(?:곧|금방)\s*(?:돌아올게요?|올게요?)|다녀올게요?|고마워요?|고맙습니다|감사합니다|감사해요?|수고했어요?|수고하셨습니다|안녕|그럼|이제|오늘도|자|응|네/g;
+/** A goodbye and nothing to do first, by the words alone (no Jev). English: six words or fewer, as before. Korean says in three words
+ *  what English says in seven ("커밋하고 잘 자"), so there it is only a goodbye when nothing but goodbye, thanks and filler is left. */
+export const byeOnly = (full: string): boolean => /[가-힣]/.test(full) ? full.replace(BYE_ONLY_KO, '').replace(/[\s.,!?~…]+/g, '') === '' : full.split(/\s+/).length <= 6;

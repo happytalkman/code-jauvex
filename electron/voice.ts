@@ -7,7 +7,7 @@ import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-age
 import type { AppCommand, BusyTriage, CommandDetails, Provider, SetupCheck, Transcript, VoiceStatus } from '../shared/types.js';
 import { PROVIDER_LABEL, withAppWords } from '../shared/types.js';
 import { wakeMatch } from '../shared/transcript.js';
-import { AGENT_KIND_CHOICES, JEV_MIN_CONFIDENCE, agentKindSaid, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked } from '../shared/orders.js';
+import { AGENT_KIND_CHOICES, JEV_MIN_CONFIDENCE, agentKindSaid, byeAsked, byeOnly, farewellTone, holdAsked, holdOnly, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked } from '../shared/orders.js';
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import * as claw from './claw.js';
@@ -513,31 +513,27 @@ async function detailsByModel(full: string, projects: { id: string; name: string
 }
 // "Bye", "good night", "talk to you later", "I'll be back": the conversation is over for now. The voice says goodbye and voice
 // mode ends. Short utterances only; Jev confirms it is a farewell when it is there (a "bye" inside a story is not one).
-/* "One second", "wait", "hold on", "let me think": they are pausing, not asking for anything. Nothing goes to the main thread,
-   the voice says it will wait. Jev tells a pause from "wait, make it blue" (a task); without Jev only the bare phrase counts. */
-const HOLD_WORDS = /\b(?:one|a|just a|give me a|gimme a)\s+(?:sec|second|moment|minute|min)\b|\b(?:hold on|hang on|wait|standby|stand by|not yet|let me think|one moment)\b/i;
-const HOLD_ONLY = /^(?:(?:one|a|just a|give me a|gimme a)\s+(?:sec|second|moment|minute|min)|hold on|hang on|wait|wait (?:a (?:sec|second|moment|minute|bit)|up)|standby|stand by|not yet|let me think|one moment|hold on a (?:sec|second|moment|minute))$/i;
+/* "One second", "wait", "hold on", "let me think", "잠깐만": they are pausing, not asking for anything. Nothing goes to the main thread,
+   the voice says it will wait. Jev tells a pause from "wait, make it blue" (a task); without Jev only the bare phrase counts.
+   The gates, English and Korean ("잘 자", "이따 봐"): shared/orders.ts. */
 async function holding(full: string): Promise<AppCommand | null> {
-  const words = full.split(/\s+/).length; if (words > 10 || !HOLD_WORDS.test(full)) return null;
+  if (!holdAsked(full)) return null;
   const say = pick(['Sure, take your time.', "Okay, I'm here.", 'Take your time.', 'Of course, no rush.']);
   const r = await jev.decide({ said: full }, { pausing: { type: 'noul', instructions: 'A person is talking to an assistant by voice and just said `said`. Are they only asking the assistant to wait (they are pausing, thinking, or about to say more), with nothing in it for the assistant to do or answer yet?', criteria: { true: 'Yes: one second, wait, hold on, let me think, not yet, and nothing else of substance', false: 'No: there is a task, a question, a correction or a message in it ("wait, make it blue", "one second, what did you say?"), or the words are used in passing' } } }, 900);
   if (r?.answers.pausing) { const p = r.answers.pausing.noul; debug.log('note', `a pause, not a message? ${p.toFixed(2)}  <- ${full}`, { by: 'jev', ms: r.ms }); return p >= 0.6 ? { type: 'hold', by: 'jev', say } : null; }
-  const bare = full.trim().replace(/^\W*(?:(?:yeah|yes|okay|ok|oh|um|uh|hmm|so|and|please|just|now)\b\W*)+/i, '').replace(/[.,!?…\s]+$/, '').trim();
-  if (HOLD_ONLY.test(bare)) { debug.log('note', `a pause, not a message (by the words alone)  <- ${full}`, { by: 'rule' }); return { type: 'hold', by: 'rule', say }; }
+  if (holdOnly(full)) { debug.log('note', `a pause, not a message (by the words alone)  <- ${full}`, { by: 'rule' }); return { type: 'hold', by: 'rule', say }; }
   return null;
 }
-const BYE_GATE = /\b(bye|goodbye|good ?night|see you|see ya|talk (?:to you )?later|talk later|catch you later|i'?ll be back|be right back|be back later|that'?s all for now|until next time|later then)\b/i;
 async function farewell(full: string): Promise<AppCommand | null> {
-  const words = full.split(/\s+/).length; if (words > 12 || !BYE_GATE.test(full)) return null;
-  const night = /good ?night/i.test(full); const back = /be (?:right )?back|later/i.test(full);
-  const say = night ? pick(['Good night, sleep well.', 'Good night. I will be here when you are back.']) : back ? pick(["Sure, I'll be here. Talk later.", 'Okay, see you in a bit.']) : pick(['Bye for now.', 'Goodbye, talk soon.', 'See you later.']);
+  if (!byeAsked(full)) return null; const tone = farewellTone(full);
+  const say = tone === 'night' ? pick(['Good night, sleep well.', 'Good night. I will be here when you are back.']) : tone === 'back' ? pick(["Sure, I'll be here. Talk later.", 'Okay, see you in a bit.']) : pick(['Bye for now.', 'Goodbye, talk soon.', 'See you later.']);
   // Two questions: is it a goodbye at all, and is there something to do first ("set the alarm for eight, then bye")?
   const r = await jev.decide({ said: full }, {
     farewell: { type: 'noul', instructions: 'A person is talking to an assistant by voice and just said `said`. Are they saying goodbye or ending the conversation for now (as opposed to mentioning these words in passing)?', criteria: { true: 'Yes: bye, good night, talk later, be right back, that is all for now', false: 'No: the words are part of a request, a story or a question' } },
-    task: { type: 'noul', instructions: 'Besides the goodbye, does `said` ask the assistant to do something first (a task, a question to answer, something to set, send, save or check)?', criteria: { true: 'Yes: there is an instruction or a question in it, to be done before the goodbye', false: 'No: it is only a goodbye, thanks or small talk' } },
+    task: { type: 'noul', instructions: 'Besides the goodbye, does `said` ask the assistant to do something first (a task, a question to answer, something to set, send, save or check)?', criteria: { true: 'Yes: there is an instruction or a question in it, to be done before the goodbye', false: 'No: it is only a goodbye, thanks or small talk. Wrapping up is part of the goodbye, not a task: "that is all for today", "let us stop here", "오늘은 여기까지 하자", "여기까지 할게"' } },
   }, 900);
   if (r?.answers.farewell) { const p = r.answers.farewell.noul; const t = r.answers.task?.noul ?? 0; debug.log('note', `farewell? ${p.toFixed(2)}, something to do first? ${t.toFixed(2)}  <- ${full}`, { by: 'jev', ms: r.ms }); return p >= 0.6 ? { type: 'goodbye', by: 'jev', say, ...(t >= 0.5 ? { after: true } : {}) } : null; }
-  if (words <= 6) { debug.log('note', `farewell (short, by the words alone)  <- ${full}`, { by: 'rule' }); return { type: 'goodbye', by: 'rule', say }; }
+  if (byeOnly(full)) { debug.log('note', `farewell (only that, by the words alone)  <- ${full}`, { by: 'rule' }); return { type: 'goodbye', by: 'rule', say }; }
   debug.log('note', `farewell with more in it (by the words alone): the message goes through first  <- ${full}`, { by: 'rule' }); return { type: 'goodbye', by: 'rule', say, after: true };
 }
 export async function command(full: string, projects: { id: string; name: string; path?: string }[], currentId: string, speaker?: { provider: Provider; model: string; main: string; mainModel?: string }): Promise<AppCommand | null> {

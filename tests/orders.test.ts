@@ -1,5 +1,5 @@
 // When the app carries out an order said to it and when it asks first (shared/orders.ts).
-import { AGENT_KIND_CHOICES, agentKindSaid, answerIs, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked, stopSaysMore } from '../shared/orders.ts';
+import { AGENT_KIND_CHOICES, agentKindSaid, answerIs, byeAsked, byeOnly, farewellTone, holdAsked, holdOnly, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked, stopSaysMore } from '../shared/orders.ts';
 let failed = 0; const check = (name: string, ok: boolean, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` ${detail}` : ''}`); if (!ok) failed++; };
 
 // The case that opened a new agent nobody asked for: Jev leaned to the agent (0.55, not sure), the voice model read an order.
@@ -48,4 +48,17 @@ for (const [said, answer] of [['네', 'yes'], ['응, 열어줘', 'yes'], ['그�
   check(`"${said}" is ${answer ?? 'neither'}`, answerIs(said) === answer, `got ${answerIs(said)}`);
 // Jev's choice of kind had no Claw (2026-09-27): "Open a new claw agent here" and "클로 에이전트 새로 시작해" opened Claude (Jev: claude 0.97).
 check('Jev can answer every kind of agent: each provider, Jev, and none named', ['claude', 'codex', 'zcode', 'claw', 'jev', 'unspecified'].every((k) => k in AGENT_KIND_CHOICES.criteria), Object.keys(AGENT_KIND_CHOICES.criteria).join());
+// A pause and a goodbye, in English as before and in Korean (2026-09-27: "잠깐만" and "잘 자" went to the agent as messages).
+for (const s of ['One second.', 'Hold on a sec.', '잠깐만.', '잠시만요', '잠깐, 파란색으로 바꿔', '생각 좀 해볼게', '기다려 줘']) check(`a pause may be meant: "${s}"`, holdAsked(s));
+for (const s of ['Rename the footer label.', '푸터 이름 바꿔줘', '테스트 끝날 때까지 배포하지 마']) check(`no pause in: "${s}"`, !holdAsked(s));
+for (const s of ['wait', 'one second', '잠깐만', '잠시만요', '어 잠깐만', '잠깐 기다려 줘', '기다려 주세요', '생각 좀 해볼게', '아직이야', '있어 봐']) check(`only a pause, by the words alone: "${s}"`, holdOnly(s));
+for (const s of ['wait, make it blue', '잠깐, 파란색으로 바꿔', '잠깐만 뭐라고 했어?', '기다려서 배포해']) check(`more than a pause: "${s}"`, !holdOnly(s));
+for (const s of ['Bye.', 'Okay, good night.', '잘 자.', '잘자', '안녕히 계세요', '이따 봐', '나중에 얘기하자', '오늘은 여기까지 하자', '곧 돌아올게']) check(`a goodbye may be meant: "${s}"`, byeAsked(s));
+for (const s of ['안녕!', '안녕하세요', '로그인 페이지 고쳐줘', '수고했어']) check(`no goodbye in: "${s}" (안녕 alone is also hello)`, !byeAsked(s));
+// Without Jev: Korean says in three words what English says in seven. "커밋하고 잘 자" was a plain goodbye by the word count, and the commit lost.
+for (const s of ['Bye.', 'Okay, good night.', '잘 자.', '오늘은 여기까지 하자, 이따 봐.', '고마워, 잘 자요', '그럼 내일 봐요', '안녕히 계세요']) check(`only a goodbye, by the words alone: "${s}"`, byeOnly(s));
+for (const s of ['Commit everything you have and good night.', '커밋하고 잘 자.', '알람 여덟 시로 맞추고 잘 자', '푸터 고치고 이따 봐']) check(`a goodbye with something to do first: "${s}"`, !byeOnly(s));
+for (const s of ['잠시만요, 생각 좀 해볼게요', '잠깐만 잠깐만']) check(`only a pause, two phrases of it: "${s}"`, holdOnly(s));
+check('the goodbye\'s tone: good night, back later, or bye', farewellTone('잘 자') === 'night' && farewellTone('Okay, good night.') === 'night' && farewellTone('이따 봐') === 'back' && farewellTone('I\'ll be back later') === 'back' && farewellTone('안녕히 계세요') === 'bye' && farewellTone('Bye.') === 'bye',
+  [farewellTone('잘 자'), farewellTone('이따 봐'), farewellTone('안녕히 계세요')].join());
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);
