@@ -10,7 +10,7 @@ import typesafeMark from '../../assets/typesafe.png'; // TypeSafe's mark, on Jev
 import { Copy, EyeOff as HideIcon, Pencil, Bug, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Paperclip, Settings, Move, Keyboard, ChevronRight, Eye, EyeOff, FolderPlus, Folder, FolderOpen, Laptop, Mic, PanelLeft, Plus, RotateCw, Search, SlidersHorizontal, Settings2, Square, SquarePen, Trash2, Clapperboard, Briefcase, Globe, MicOff, Volume2, VolumeX, AudioLines, Wrench, Brain, X, Check, ShieldQuestion } from 'lucide-react';
 import { md } from './md';
 import { Pane, type PaneTarget } from './Pane';
-import { findAgents, shortIds, shortTitle } from '../../shared/roster';
+import { findAgents, newChatProvider, shortIds, shortTitle } from '../../shared/roster';
 import { answerIs, stopSaysMore } from '../../shared/orders';
 import { opencutAddress, opencutUrl } from '../../shared/opencut';
 import { DICTATED_TAG, JAUVEX_HELLO, SIGN_IN_IN_APP, type AgentRequestEvent, type JauvexEntry, type UiState, type AgentCommand, type AgentResult, type Attachment, CLAW_MODELS, PROVIDERS, PROVIDER_LABEL, VOICE_DEFAULTS, kickoffMessage, type CommandDetails, providerOf, type VoiceCommand, type AppCommand, type Block, type BusyTriage, type DebugEvent, type ChatEvent, type ChatMessage, type ModelOption, type PermissionDecision, type Project, type Permissions, type Provider, type SessionInfo, type SessionPrefs, type VoiceSettings, type VoiceStatus } from '../../shared/types';
@@ -569,7 +569,7 @@ export function Chat({ embed, jev, startVoice, kickoff, nameOnStart, onNamed, on
   const lastSent = useRef<{ text: string; images?: Attachment[]; at: number; resent: boolean; dictated?: boolean } | null>(null); // the last message sent, to send again once if its turn is swallowed
   const sendRef = useRef<(text: string, spoken?: boolean, preparedAck?: Promise<Spoken | null>, fromQueue?: boolean, images?: Attachment[], resend?: boolean, dictated?: boolean) => Promise<void>>(async () => {});
   // A session belongs to one provider for life. Only a new, still empty session lets you choose.
-  const [provider, setProvider] = useState<Provider>(() => (embed ? embed.provider : hybrid ? hybrid.provider : sessionId ? info?.provider ?? providerOf(project, sessionId) : signedIn && signedIn.claude !== signedIn.codex ? (signedIn.claude ? 'claude' : 'codex') : localStorage.getItem('cvc.provider') === 'codex' ? 'codex' : 'claude'));
+  const [provider, setProvider] = useState<Provider>(() => (embed ? embed.provider : hybrid ? hybrid.provider : sessionId ? info?.provider ?? providerOf(project, sessionId) : newChatProvider(localStorage.getItem('cvc.provider'), signedIn ?? { claude: true, codex: true, zcode: true, claw: true })));
   // Model, effort and permissions belong to the session: what was picked here comes back with it. A new session starts from the last choices made anywhere.
   const kept = sessionId ? project.prefs?.[sessionId] : undefined;
   const [model, setModel] = useState(() => kept?.model ?? localStorage.getItem(modelKey(provider)) ?? (provider === 'claude' ? CLAUDE_DEFAULT_MODEL : ''));

@@ -1,4 +1,5 @@
 // Names and short ids for the sessions the app lists and the agents it lets talk to each other. Pure, shared by the main process and the window.
+import type { Provider } from './types';
 
 /** A title for a session list or a roster: the text on one line, cut at a word, at most `max` characters. A session with no name of its
  * own is shown by its first message, and a dictated first message can be a whole paragraph. */
@@ -28,4 +29,12 @@ export function findAgents<T extends { sessionId: string; name: string }>(all: T
   // the longest such name wins, so "Video Agent" does not take a message meant for "Acme Video Agent"
   const holds = others.filter((a) => squash(a.name).length >= 6 && want.includes(squash(a.name))); if (!holds.length) return [];
   const longest = Math.max(...holds.map((a) => squash(a.name).length)); return holds.filter((a) => squash(a.name).length === longest);
+}
+
+/** The provider of a new chat that names none yet: the one last chosen (`stored`, the window's `cvc.provider`, which `new-agent
+ * --provider` sets too). ZCode and Claw are taken as chosen; between Claude and Codex, when only one is signed in, that one. The window
+ * once knew only Claude and Codex here, and `new-agent --provider zcode` (or claw) opened a Claude chat. */
+export function newChatProvider(stored: string | null, signedIn: Record<Provider, boolean>): Provider {
+  if (stored === 'zcode' || stored === 'claw') return stored;
+  return signedIn.claude !== signedIn.codex ? (signedIn.claude ? 'claude' : 'codex') : stored === 'codex' ? 'codex' : 'claude';
 }
