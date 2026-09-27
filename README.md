@@ -140,7 +140,9 @@ HTTP API (`POST /v1/graphs/{graph}/query`, a bearer token, the `x-graph-namespac
 every observation turns the page into a numbered table of elements, TypeSafe's Jev picks the operation (click, type, select, scroll,
 wait, done, blocked) and its target in one request, and a small LLM writes text only when the operation is typing. Every agent can hand
 it a task: Claude sessions with the `browse` tool, any session with `node scripts/browse.ts --url <https://...> --goal "<goal>"`, and the
-briefing says so (one narrow goal per run; check the last page it reports, since its DONE is a choice, not a proof).
+briefing says so (one narrow goal per run; check the last page it reports, since its DONE is a choice, not a proof). A run that
+ends on Chrome's own error page (no network, a certificate the browser does not trust) is a failure whatever it chose there: the
+page did not load, and the result says why (`net::ERR_...`); it once chose DONE on such a page after 0 steps.
 
 - It runs from its own clone (`<home>/jev-ultrafast`, or `JEV_ULTRAFAST_DIR`) and environment: `uv run --project <clone>` runs our
   `scripts/browse_runner.py`, which uses its `Agent` and prints each step and the result as JSON lines; `shared/browse.ts` turns them into

@@ -66,11 +66,13 @@ export function browseSummary(lines: string[], stderr = ''): { ok: boolean; text
     if (o.type === 'step') steps.push(o as unknown as BrowseStep); else if (o.type === 'result') result = o as unknown as BrowseResult; else if (o.type === 'error') error = String(o.error ?? ''); else if (o.type === 'note') notes.push(String(o.note ?? '')); }
   const stepText = steps.map((s) => `${s.step}. ${s.choice}: ${s.action}${s.text ? ` <- "${s.text}"` : ''}${s.page_changed === false ? ' (the page did not change)' : ''}`).join('\n');
   if (!result) return { ok: false, text: `The browser agent failed: ${error || stderr.trim().split('\n').slice(-3).join(' ') || 'no answer'}${stepText ? `\nSteps before it failed:\n${stepText}` : ''}` };
-  const how = result.status === 'done' ? 'says the goal is reached (check the page below: DONE is its choice, not a proof)' : 'stopped without reaching the goal (blocked)';
+  // Chrome's own error page (no network, a certificate it does not trust): whatever the agent chose there, the page never loaded.
+  const unloaded = /^chrome-error:/i.test(result.url ?? ''); const reason = unloaded ? result.elements.join(' ').match(/net::ERR_[A-Z_]+/)?.[0] : undefined;
+  const how = unloaded ? `could not work: the page did not load (${[result.title, reason].filter(Boolean).join(', ') || 'a browser error page'})` : result.status === 'done' ? 'says the goal is reached (check the page below: DONE is its choice, not a proof)' : 'stopped without reaching the goal (blocked)';
   const text = [`The browser agent ${how}, after ${result.steps} step${result.steps === 1 ? '' : 's'} in ${(result.elapsed_ms / 1000).toFixed(1)} s.${notes.length ? ` ${notes.join(' ')}.` : ''}`,
     `It ended on ${result.url ?? 'an unknown page'}${result.title ? ` ("${result.title}")` : ''}.`, stepText ? `Steps:\n${stepText}` : 'No steps were taken.',
     result.elements.length ? `What was on that page (the elements it could act on):\n${result.elements.join('\n')}` : ''].filter(Boolean).join('\n\n');
-  return { ok: result.status === 'done', text };
+  return { ok: result.status === 'done' && !unloaded, text };
 }
 
 /** One task, start to end: the runner under uv, with the TypeSafe key in its environment only. */

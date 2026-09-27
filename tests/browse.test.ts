@@ -19,6 +19,10 @@ check('only http(s) addresses', browseUrl('https://a.test/x') === 'https://a.tes
 const s = browseSummary([JSON.stringify({ type: 'step', step: 1, action: 'Pricing', choice: 'CLICK', page_changed: false }), 'a line of text', JSON.stringify({ type: 'result', status: 'done', url: 'https://a/p', title: 'P', steps: 1, elapsed_ms: 1500, elements: ['[1] heading P'] })]);
 check('a result: how it ended (DONE is not a proof), each step, the last page and what was on it', s.ok && /says the goal is reached/.test(s.text) && /not a proof/.test(s.text) && /1\. CLICK: Pricing \(the page did not change\)/.test(s.text) && /ended on https:\/\/a\/p \("P"\)/.test(s.text) && /\[1\] heading P/.test(s.text), s.text);
 check('a crash: the runner\'s error, else the end of stderr', !browseSummary([JSON.stringify({ type: 'error', error: 'boom' })]).ok && /failed: boom/.test(browseSummary([JSON.stringify({ type: 'error', error: 'boom' })]).text) && /last words/.test(browseSummary([], 'x\nlast words').text));
+// A real run (2026-09-27, behind a proxy the browser did not trust): jev-ultrafast chose DONE on Chrome's error page after 0 steps, and the
+// app said "the goal is reached".
+const err = browseSummary([JSON.stringify({ type: 'result', status: 'done', url: 'chrome-error://chromewebdata/', title: 'Privacy error', steps: 0, elapsed_ms: 500, elements: ['[1] link Learn more about this warning', '[2] button net::ERR_CERT_AUTHORITY_INVALID', '[4] button Back to safety'] })]);
+check('an error page is not a success: the page did not load, and the browser\'s reason', !err.ok && /did not load/.test(err.text) && /net::ERR_CERT_AUTHORITY_INVALID/.test(err.text) && !/goal is reached/.test(err.text), err.text);
 const brief = clientBriefing(false, undefined, false, '/app'); check('every agent is told about it, with the command at the app\'s path', /browser agent/.test(brief) && brief.includes('node "/app/scripts/browse.ts"'));
 
 // ---- a run, on the stand-in
