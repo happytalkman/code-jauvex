@@ -38,6 +38,9 @@ check('a turn in the window: the user\'s words and image, then the tool call, it
 check('a failed turn shows red', claw.turnMessages('s', 1, { at: 1, user: 'x', reply: '', tools: [], error: 'refused' })[1]!.error === true);
 const usage = clawFromRecord({ turns: 3, input: 1200, output: 300, costUsd: 0.5, week: { turns: 2, input: 1000, output: 200, costUsd: 0.25 } }, 1);
 check('the usage panel: the last 7 days in words with claw\'s cost estimate, no plan windows', usage.provider === 'claw' && usage.windows.length === 0 && /2 turns, about \$0\.25/.test(usage.notes?.[0] ?? '') && /All time/.test(usage.notes?.[1] ?? ''), JSON.stringify(usage.notes));
+// A real run (2026-09-27, four turns of a few tokens each) said "about under $0.01".
+const tiny = clawFromRecord({ turns: 4, input: 48, output: 24, costUsd: 0.0024, week: { turns: 4, input: 48, output: 24, costUsd: 0.0024 } }, 1);
+check('the usage panel: a cost under a cent reads "under $0.01", not "about under $0.01"', /4 turns, under \$0\.01 /.test(tiny.notes?.[0] ?? ''), JSON.stringify(tiny.notes));
 check('the voice hears "claw" as Claw, and Claude still as Claude', agentKindSaid('open a new claw agent here') === 'claw' && agentKindSaid('a new Claude agent') === 'claude');
 
 // ---- through the app, on the stand-in

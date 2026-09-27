@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { PROVIDER_LABEL, type Provider, type ProviderUsage, type UsageWindow } from '../../shared/types';
-import { planName, resetText, usageLevel, windowWords } from '../../shared/usage';
+import { notAvailable, planName, resetText, usageLevel, windowWords } from '../../shared/usage';
 
 // How much of the provider's plan is left, as a small battery next to the composer. It shows the tightest window (the one
 // with the least left) that counts for the model in use. A click opens the whole picture (T-98): every window of this chat's
@@ -27,7 +27,7 @@ export function UsageBattery({ provider, model, tick, others = [] }: { provider:
   const name = PROVIDER_LABEL[provider]; const toggle = () => setOpen((x) => !x);
   let button;
   if (!u) button = <button className="battery unknown" title={`Checking how much ${name} usage is left…`} aria-label={`${name} usage: checking`} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /></button>;
-  else if (!u.available) button = <button className="battery off" title={`${name} usage is not available here: ${u.error ?? 'no usage information for this account'}.`} aria-label={`${name} usage not available`} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /><span className="battery-pct">n/a</span></button>;
+  else if (!u.available) button = <button className="battery off" title={`${name} usage: ${notAvailable(u.error).replace(/^Not/, 'not')}`} aria-label={`${name} usage not available`} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /><span className="battery-pct">n/a</span></button>;
   else if (!u.windows.length) button = <button className="battery off" title={`${name}: no plan limit here.${u.notes?.length ? `\n${u.notes.slice(0, -1).join('\n')}` : ''}\nClick for more.`} aria-label={`${name} usage: no plan limit`} aria-expanded={open} onClick={toggle}><span className="battery-body" /><span className="battery-cap" /><span className="battery-pct">∞</span></button>; // tokens used, no window to fill: ZCode on API-key providers
   else {
     // A window that belongs to one model only counts when that is the model in use (known once it is picked, or reported by the first turn).
@@ -59,7 +59,7 @@ function UsageSection({ usage, provider, model, here = false }: { usage: Provide
     <section className="use-sec">
       <div className="use-name">{PROVIDER_LABEL[provider]}{usage?.plan ? ` · ${planName(usage.plan)} plan` : ''}{here && <em>this chat</em>}</div>
       {!usage ? <p className="ctx-note">Checking…</p>
-        : !usage.available ? <p className="ctx-note">Not available: {usage.error ?? 'no usage information for this account'}.</p>
+        : !usage.available ? <p className="ctx-note">{notAvailable(usage.error)}</p>
         : usage.windows.map((w) => { const left = Math.round(100 - w.usedPercent); const other = here && !counts(w, model); return (
           <div key={w.label} className={`use-row${other ? ' other' : ''}`}>
             <div className="use-top"><span>{windowWords(w.label)}</span><b>{left} % left</b></div>

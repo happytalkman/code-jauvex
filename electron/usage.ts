@@ -87,9 +87,9 @@ export function codexFromLimits(r: { rateLimits: RateSnapshot; rateLimitsByLimit
 /** Claw keeps no usage of its own that the app can ask for: the app's record of its turns (electron/claw.ts), in words. No windows:
  * claw runs on an API key, billed by the provider; the cost is claw's own estimate. Pure: tests/claw-provider.test.ts. */
 export function clawFromRecord(u: { turns: number; input: number; output: number; costUsd: number; week: { turns: number; input: number; output: number; costUsd: number } }, at: number): ProviderUsage {
-  const w = u.week; const cost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : n > 0 ? 'under $0.01' : '$0');
-  const notes = w.turns ? [`Last 7 days here: ${tokens(w.input + w.output)} tokens in ${w.turns} turn${w.turns === 1 ? '' : 's'}, about ${cost(w.costUsd)} (claw's estimate).`] : ['No Claw turns here in the last 7 days.'];
-  if (u.turns > w.turns) notes.push(`All time: ${tokens(u.input + u.output)} tokens in ${u.turns} turns, about ${cost(u.costUsd)}.`);
+  const w = u.week; const cost = (n: number) => (n >= 0.01 ? `about $${n.toFixed(2)}` : n > 0 ? 'under $0.01' : '$0');
+  const notes = w.turns ? [`Last 7 days here: ${tokens(w.input + w.output)} tokens in ${w.turns} turn${w.turns === 1 ? '' : 's'}, ${cost(w.costUsd)} (claw's estimate).`] : ['No Claw turns here in the last 7 days.'];
+  if (u.turns > w.turns) notes.push(`All time: ${tokens(u.input + u.output)} tokens in ${u.turns} turns, ${cost(u.costUsd)}.`);
   notes.push('No plan limit here: Claw runs on an Anthropic API key, billed by Anthropic.');
   return { provider: 'claw', available: true, windows: [], at, notes };
 }

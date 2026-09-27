@@ -3,7 +3,7 @@
 // the words the panel says (shared/usage.ts).
 import path from 'node:path'; process.env.CVC_ROOT = path.resolve('.'); process.env.CVC_DATA_DIR ??= path.resolve('tmp/testdata');
 const { claudeFromUsage, codexFromLimits, zcodeFromStats } = await import('../electron/usage.ts');
-const { planName, resetText, usageLevel, windowWords } = await import('../shared/usage.ts');
+const { notAvailable, planName, resetText, usageLevel, windowWords } = await import('../shared/usage.ts');
 let failed = 0; const check = (name: string, ok: boolean, got = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok || !got ? '' : `: ${got}`}`); if (!ok) failed++; };
 const now = Date.parse('2026-09-23T16:00:00Z'); const iso = (m: number) => new Date(now + m * 60_000).toISOString(); const clock = (_at: number, far: boolean) => (far ? 'Sun 19:00' : '18:14');
 
@@ -36,4 +36,7 @@ check('ZCode: available, no windows (no plan limit)', z.available && z.windows.l
 check('ZCode: the week, the model used most, today, and why there is no limit', JSON.stringify(z.notes) === JSON.stringify(['Last 7 days on this Mac: 8.4M tokens in 120 turns.', 'Most of it on zhipu/glm-5 (71 %).', 'Today: 1.2M tokens.', 'No plan limit here: ZCode runs on providers with an API key, billed by the provider.']), JSON.stringify(z.notes));
 const z0 = zcodeFromStats({ summary: { totalTokens: 0, totalTurns: 0 }, models: [], dailyModelUsage: [] }, now, '2026-09-23');
 check('ZCode: a quiet week says so', z0.notes?.[0] === 'No ZCode turns on this Mac in the last 7 days.' && z0.notes.length === 2, JSON.stringify(z0.notes));
+// The panel said "Not available: Plan limits do not apply to this sign-in (API key or cloud provider).." (a real run, 2026-09-27).
+check('not available: one full stop after a reason that has its own', notAvailable('Plan limits do not apply to this sign-in (API key or cloud provider).') === 'Not available: Plan limits do not apply to this sign-in (API key or cloud provider).', notAvailable('Plan limits do not apply to this sign-in (API key or cloud provider).'));
+check('not available: a reason without one gets it', notAvailable('spawn codex ENOENT') === 'Not available: spawn codex ENOENT.' && notAvailable(undefined) === 'Not available: no usage information for this account.', notAvailable('spawn codex ENOENT'));
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);
