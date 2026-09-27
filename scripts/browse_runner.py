@@ -40,7 +40,9 @@ def main():
             state = agent.state
             for state in agent.run():
                 for h in state["history"][seen:]:
-                    out({"type": "step", "step": h["step"], "action": h["action"], "choice": h["choice"], "text": h["text"],
+                    # "choice" is the element's id (e2); "operation" is what was done to it (CLICK, TYPE_TEXT, ...)
+                    out({"type": "step", "step": h["step"], "action": h["action"], "choice": h["choice"], "operation": h.get("operation"),
+                         "confidence": h.get("confidence"), "text": h["text"],
                          "url": h["url"], "page_changed": h["page_changed"], "elapsed_ms": h["elapsed_ms"]})
                 seen = len(state["history"])
                 if time.monotonic() - started > args.max_seconds:

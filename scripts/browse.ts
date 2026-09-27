@@ -21,6 +21,6 @@ if (args.includes('--open')) {
   }
 } else {
 if (!url || !goal) { console.error('usage: node scripts/browse.ts --url <https://...> --goal "<what to do there>" [--max-seconds 180]'); process.exit(2); }
-const r = await runBrowse(browseSetup(os.homedir(), root), url, goal, readKey(os.homedir()), { maxSeconds: max > 0 ? max : 180, onStep: (s) => console.error(`step ${s.step}: ${s.choice} ${s.action}`) });
+const r = await runBrowse(browseSetup(os.homedir(), root), url, goal, readKey(os.homedir()), { maxSeconds: max > 0 ? max : 180, onStep: (s) => console.error(`step ${s.step}: ${s.operation || s.choice} ${s.action}`) });
 console.log(r.text); process.exitCode = r.ok ? 0 : 1; // set, not forced: process.exit() right after a request aborted Node on Windows
 }

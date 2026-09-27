@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 
-export type BrowseStep = { step: number; action: string; choice: string; text?: string | null; url?: string; page_changed?: boolean | null; elapsed_ms?: number };
+export type BrowseStep = { step: number; action: string; choice: string; operation?: string | null; confidence?: number | null; text?: string | null; url?: string; page_changed?: boolean | null; elapsed_ms?: number };
 export type BrowseResult = { status: string; url?: string; title?: string; steps: number; elapsed_ms: number; elements: string[] };
 export type BrowseSetup = { dir: string; uv: string; runner: string; chrome: string | null; profile: string; port: number; cdp: string | null };
 export const BROWSE_PORT = 9333;
@@ -64,7 +64,7 @@ export function browseSummary(lines: string[], stderr = ''): { ok: boolean; text
   const steps: BrowseStep[] = []; let result: BrowseResult | null = null; let error = ''; const notes: string[] = [];
   for (const l of lines) { let o: { type?: string } & Record<string, unknown>; try { o = JSON.parse(l) as typeof o; } catch { continue; }
     if (o.type === 'step') steps.push(o as unknown as BrowseStep); else if (o.type === 'result') result = o as unknown as BrowseResult; else if (o.type === 'error') error = String(o.error ?? ''); else if (o.type === 'note') notes.push(String(o.note ?? '')); }
-  const stepText = steps.map((s) => `${s.step}. ${s.choice}: ${s.action}${s.text ? ` <- "${s.text}"` : ''}${s.page_changed === false ? ' (the page did not change)' : ''}`).join('\n');
+  const stepText = steps.map((s) => `${s.step}. ${s.operation || s.choice}: ${s.action}${s.text ? ` <- "${s.text}"` : ''}${s.page_changed === false ? ' (the page did not change)' : ''}`).join('\n');
   if (!result) return { ok: false, text: `The browser agent failed: ${error || stderr.trim().split('\n').slice(-3).join(' ') || 'no answer'}${stepText ? `\nSteps before it failed:\n${stepText}` : ''}` };
   // Chrome's own error page (no network, a certificate it does not trust): whatever the agent chose there, the page never loaded.
   const unloaded = /^chrome-error:/i.test(result.url ?? ''); const reason = unloaded ? result.elements.join(' ').match(/net::ERR_[A-Z_]+/)?.[0] : undefined;
