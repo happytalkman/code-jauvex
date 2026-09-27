@@ -41,7 +41,7 @@ function boot(): Server {
     for (const w of s.waiting.values()) w.reject(new Error(why)); s.waiting.clear();
     for (const t of turns.values()) if (t.server === s) t.fail(why);
   };
-  child.on('error', (e) => down(`Codex could not start: ${e.message}`));
+  child.on('error', (e) => down((e as NodeJS.ErrnoException).code === 'ENOENT' ? 'Codex could not start: the codex command was not found. The app brings it with its packages: run npm install in the app\'s folder, then sign in with codex login.' : `Codex could not start: ${e.message}`)); // no such command: in words, not "spawn codex ENOENT"
   child.on('exit', (code) => down(`Codex stopped (${code ?? 'signal'}). ${stderr.split('\n').slice(-2).join(' ')}`.trim()));
   readline.createInterface({ input: child.stdout! }).on('line', (line) => {
     let m: Rpc; try { m = JSON.parse(line) as Rpc; } catch { return; }

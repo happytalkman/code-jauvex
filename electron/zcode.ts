@@ -49,7 +49,7 @@ function boot(): Server {
     for (const w of s.waiting.values()) w.reject(new Error(why)); s.waiting.clear();
     for (const t of turns.values()) t.fail(why);
   };
-  child.on('error', (e) => down(`ZCode could not start (${zcodeBin()} app-server): ${e.message}`));
+  child.on('error', (e) => down((e as NodeJS.ErrnoException).code === 'ENOENT' ? `ZCode could not start: the zcode command was not found (${zcodeBin()}). Build it from github.com/zai-org/ZCode (pnpm build:zcode) and put zcode on the PATH, then sign in with zcode login.` : `ZCode could not start (${zcodeBin()} app-server): ${e.message}`)); // no such command: in words, not "spawn zcode ENOENT"
   child.on('exit', (code) => down(`ZCode stopped (${code ?? 'signal'}). ${stderr.split('\n').slice(-2).join(' ')}`.trim()));
   readline.createInterface({ input: child.stdout! }).on('line', (line) => {
     let m: Rpc; try { m = JSON.parse(line) as Rpc; } catch { return; }
