@@ -1,6 +1,7 @@
 import { APP_ROOT, projectOr404, saveState } from './backend.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { shortTitle } from '../shared/roster.js';
@@ -151,9 +152,10 @@ export async function usage(): Promise<{ turns: number; input: number; output: n
   return { ...total, week };
 }
 export const voiceModel = (preferred: string): string => (CLAW_MODELS.some((m) => m.id === preferred) ? preferred : 'haiku'); // the voice's lines: the smallest
-/** One question, answered by claw in read-only mode (the voice's lines when the session on screen is a Claw session). */
+/** One question, answered by claw in read-only mode (the voice's lines when the session on screen is a Claw session), in the temp folder:
+ *  claw files a session where it runs (.claw/sessions), and in the app's own folder it left one for every spoken line (2026-09-27). */
 export async function runOnce(text: string, model?: string, timeoutMs = 30_000): Promise<string> {
-  const r = await runClaw(process.cwd(), text, ['--permission-mode', 'read-only', '--model', voiceModel(model ?? '')], undefined, timeoutMs);
+  const r = await runClaw(os.tmpdir(), text, ['--permission-mode', 'read-only', '--model', voiceModel(model ?? '')], undefined, timeoutMs);
   const p = parseClaw(r.out); if (!p.ok) throw new Error(p.error); return p.reply.trim();
 }
 export const voiceAsk = (instructions: string, message: string, preferred: string, timeoutMs: number): Promise<string> => runOnce(`${instructions}\n\n${message}`, preferred, timeoutMs);

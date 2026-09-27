@@ -5,6 +5,7 @@
 // message during a turn is not steered in (claw cannot take it), images are said to be unseen, the session can be renamed, readiness
 // needs an API key, the usage panel says what the turns cost, and the voice asks claw read-only on the smallest model. Then, when a real
 // claw and claw's own mock Anthropic service are given (CVC_CLAW_REAL, CVC_CLAW_MOCK_API), the same turn through the real binary.
+import os from 'node:os'; import { realpathSync } from 'node:fs';
 import path from 'node:path'; import { readFileSync, rmSync } from 'node:fs';
 process.env.CVC_ROOT = path.resolve('.'); process.env.CVC_DATA_DIR ??= path.resolve('tmp/testdata');
 process.env.CVC_CLAW_BIN = path.resolve('tests/mock/claw'); const LOG = path.join(process.env.CVC_DATA_DIR, 'claw-runs.jsonl'); process.env.MOCK_CLAW_LOG = LOG; rmSync(LOG, { force: true });
@@ -81,6 +82,8 @@ check('... without a key it is not, and says how to set one', !notReady.signedIn
 process.env.ANTHROPIC_API_KEY = 'mock-key-not-real';
 const said = await claw.runOnce('Say hello.', '');
 check('the voice asks claw read-only, on the smallest model', /\(haiku, read-only\): Say hello\./.test(said), said);
+// A real run (2026-09-27): the voice's one-shot claw ran in the app's own folder and left .claw/sessions there, a file per spoken line.
+const where = runs().at(-1)?.cwd ?? ''; check('... in the temp folder, never the app\'s own (claw writes its sessions where it runs)', where === os.tmpdir() || where === realpathSync(os.tmpdir()), where);
 check('the voice\'s model: a Claw alias, else the smallest', claw.voiceModel('opus') === 'opus' && claw.voiceModel('claude-opus-4-8') === 'haiku');
 
 // ---- the real claw, when given (see the header)
