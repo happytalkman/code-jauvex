@@ -552,6 +552,11 @@ Press the white round button in the message box. All local except the two Claude
   sentence, and inside a longer message it is only acted on when Jev is sure it is for the app. "... named X" / "call it X"
   names the agent: a Jev agent at once, a Claude or Codex session when its first turn ends (it shows in the title bar
   from the start), written to the provider like any rename.
+  The gates (`shared/orders.ts`) know Korean too: "스크래치 폴더에 새 코덱스 에이전트 만들어줘", "새 클로드 에이전트 하나 열어줘",
+  "앱 재시작해" (the exact restart), "앱 좀 껐다 켜 줄래?" (a possible one, for Jev), "인터페이스 새로고침해줘", the kinds (클로드, 코덱스,
+  제트 코드, 클로, 제브), and the answers to the app's question (네 / 응 / 그래, 아니 / 취소). Until 2026-09-27 they were English words
+  only, and a Korean order went to the agent as a message. Jev reads the Korean as it is; names ("named X") are still read in English
+  and Spanish only.
   "... about X" / "for X" is what the agent is for. Jev only says *that* this is an order to open an agent; the details
   are language, so the session's own model reads the sentence once and returns them as JSON (kind, name written as a
   person would title it, purpose, folder), overriding what the rules found, and it also writes the new agent's first

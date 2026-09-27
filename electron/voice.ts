@@ -7,7 +7,7 @@ import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-age
 import type { AppCommand, BusyTriage, CommandDetails, Provider, SetupCheck, Transcript, VoiceStatus } from '../shared/types.js';
 import { PROVIDER_LABEL, withAppWords } from '../shared/types.js';
 import { wakeMatch } from '../shared/transcript.js';
-import { JEV_MIN_CONFIDENCE, agentKindSaid, orderVerdict } from '../shared/orders.js';
+import { JEV_MIN_CONFIDENCE, agentKindSaid, newAgentAsked, orderVerdict, reloadAsked, restartAsked, restartMaybeAsked } from '../shared/orders.js';
 import * as codex from './codex.js';
 import * as zcode from './zcode.js';
 import * as claw from './claw.js';
@@ -445,7 +445,6 @@ async function jevTriage(utterance: string, task: string): Promise<BusyTriage | 
 // ---------- commands for the app itself, caught before anything reaches the main thread
 // A cheap gate first (it costs nothing on ordinary speech), then Jev settles what the words alone cannot: whether this is an
 // order for the app or a coding request about "agents", and which open folder was meant. Without Jev the rules decide alone.
-const NEW_GATE = /^\W*(?:(?:ok(?:ay)?|hey|please|now|and|so|then)\W+)*(?:can you\W+|could you\W+|i want (?:you )?to\W+|let'?s\W+)?(?:create|make|start|open|spin up|launch|give me|add|new)\b[^.?!]{0,60}\b(?:agent|session|chat|conversation)s?\b/i;
 const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 // "... named CodexAgent", "call it Billing bot", "que se llame Facturas": the name ends at the sentence, or where the folder is named.
 const NAME = /\b(?:named|called|name it|call it|with the name|llamad[oa]|que se llame|ll[aá]mal[oa])\s+["“']?(.+?)["”']?(?=\s+(?:about|for|on|to|in|inside|and|then|so|but|because|sobre|para|en|dentro|y|entonces|pero|porque)\b|[,.!?;]|$)/i;
@@ -464,15 +463,10 @@ function agentName(sentence: string): string | undefined {
   const name = m[1]!.replace(/\s+(?:in|inside of|inside|on)\s+(?:this|the|that|another|other|my)\b.*$/i, '').replace(/["“”']/g, '').trim();
   return name && name.length <= 60 && name.split(/\s+/).length <= 4 ? name : undefined; // a name is a few words; a whole clause is not one
 }
-// "Restart the app": short, and clearly about the app itself, not about a server or a service in the code.
-const RESTART_GATE = /^\W*(?:(?:ok(?:ay)?|hey|please|now|and|so|then)\W+)*(?:can you\W+|could you\W+|please\W+)?(?:restart|relaunch|reload|reboot)\W+(?:the\W+|this\W+)?(?:app|application|program|yourself)\b[^a-z]*$/i;
-// "Restart the application, please" / "can you restart the app now?": not the exact shape the rule knows, but the words are there.
-// Jev answers whether a restart of this app is meant; the voice model does when Jev is not there. Never the rule alone.
-const RESTART_WORDS = /\b(restart|relaunch|reload|reboot)\b/i;
-// "Reload the interface" / "soft restart" / "refresh the UI": the window alone, the running turns untouched.
-const RELOAD_GATE = /^\W*(?:(?:ok(?:ay)?|hey|please|now|and|so|then)\W+)*(?:can you\W+|could you\W+|please\W+)?(?:(?:reload|refresh|soft[- ]restart|soft[- ]reload)\W+(?:the\W+|this\W+)?(?:ui|interface|window|frontend|front end|view|screen)|soft\W+restart|soft\W+reload)\b(?:\W+(?:please|now))?[^a-z]*$/i;
+// The gates (a new agent, the exact restart, a possible restart, a reload of the interface), in English and Korean: shared/orders.ts.
+// A possible restart is Jev's to settle; the voice model's when Jev is not there, and then only as a question. Never the rule alone.
 async function restartMaybe(full: string, projects: { id: string; name: string }[], currentId: string, speaker?: { provider: Provider; model: string; main: string }): Promise<AppCommand | null> {
-  if (full.split(/\s+/).length > 14 || !RESTART_WORDS.test(full) || !/\b(app|application|program|yourself|program)\b/i.test(full)) return null;
+  if (!restartMaybeAsked(full)) return null;
   const cmd: AppCommand = { type: 'restart-app', by: 'rule', say: 'Okay, restarting the app.' };
   const r = await jev.decide({ said: full }, { restart: { type: 'noul', instructions: 'A user said `said` to a desktop app in which they run AI coding agents. Is restarting or relaunching this desktop app the only thing they ask? When they also ask for other work (publish, commit, build, fix, check...), the answer is No: the assistant does that work and restarts the app itself.', criteria: { true: 'Yes: only a restart, relaunch or reload of the app, the application, the program, and nothing else', false: 'No: a restart together with other work to do, or it is about a server, a service, a process or a device in their project, or a question, or something else' } } }, 1000);
   if (r?.answers.restart) { const p = r.answers.restart.noul; const v = orderVerdict({ jev: { forApp: p >= 0.5, confidence: Math.max(p, 1 - p) } }); debug.log('note', `restart of the app meant: ${p.toFixed(2)}${v === 'ask' ? ', not sure: asking first' : ''}  <- ${full}`, { by: 'jev', ms: r.ms }); return v === 'act' ? cmd : v === 'ask' ? confirmOrder(cmd, full, RESTART_QUESTION) : null; }
@@ -549,11 +543,11 @@ async function farewell(full: string): Promise<AppCommand | null> {
 export async function command(full: string, projects: { id: string; name: string; path?: string }[], currentId: string, speaker?: { provider: Provider; model: string; main: string; mainModel?: string }): Promise<AppCommand | null> {
   const hold = await holding(full); if (hold) return hold;
   const bye = await farewell(full); if (bye) return bye;
-  if (full.split(/(?<=[.!?])\s+/).some((x) => x.split(/\s+/).length <= 10 && RELOAD_GATE.test(x.replace(/^\W*(?:(?:yeah|yes|okay|ok|and|so|obviously|now|then|also|please|just)\b\W*)+/i, '')))) { debug.log('note', `app command: reload the interface  <- ${full}`, { by: 'rule' }); return { type: 'reload-ui', by: 'rule', say: 'Okay, reloading the interface.' }; }
-  if (full.split(/\s+/).length <= 8 && RESTART_GATE.test(full)) { debug.log('note', `app command: restart  <- ${full}`, { by: 'rule' }); return { type: 'restart-app', by: 'rule', say: 'Okay, restarting the app.' }; }
+  if (full.split(/(?<=[.!?])\s+/).some(reloadAsked)) { debug.log('note', `app command: reload the interface  <- ${full}`, { by: 'rule' }); return { type: 'reload-ui', by: 'rule', say: 'Okay, reloading the interface.' }; }
+  if (restartAsked(full)) { debug.log('note', `app command: restart  <- ${full}`, { by: 'rule' }); return { type: 'restart-app', by: 'rule', say: 'Okay, restarting the app.' }; }
   // The order may follow a few words of something else ("Okay, let's see if this works. Make a new Codex agent."): it is looked
   // for sentence by sentence. With more than one sentence it takes Jev's word that this is for the app (or the rest being small talk).
-  const sentences = full.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean); const at = sentences.findIndex((x) => x.split(/\s+/).length <= 22 && NEW_GATE.test(x));
+  const sentences = full.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean); const at = sentences.findIndex((x) => x.split(/\s+/).length <= 22 && newAgentAsked(x));
   if (at < 0) return restartMaybe(full, projects, currentId, speaker);
   if (full.split(/\s+/).length > 45) return null;
   const text = sentences[at]!; const rest = sentences.filter((_, i) => i !== at); const chatter = rest.every((x) => x.split(/\s+/).length <= 9);
