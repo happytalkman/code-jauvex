@@ -31,6 +31,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 /* title bar: drag region, traffic lights sit at the far left */
 .titlebar { grid-area: tb; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 92px; -webkit-app-region: drag; position: relative; z-index: 2; }
+.is-web .titlebar { padding-left: 14px; } /* in a browser there are no traffic lights to leave room for */
 .titlebar::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--side-w); background: var(--side); z-index: -1; }
 .app.no-sidebar .titlebar::before { display: none; }
 .tb-left, .tb-right { display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
@@ -67,7 +68,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .row:hover { background: var(--row-hover); } .row.on { background: var(--row); color: var(--fg); } .row.ghost { color: var(--muted); }
 .dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--faint); flex: none; } .row.on .dot { border-color: var(--muted); }
 .row .dot { margin: 0 2.5px; } /* a 7 px dot sits in the same 12 px column as a provider mark */
-.provider-icon { flex: none; opacity: .75; } .provider-icon.claude { color: var(--claude); } .provider-icon.codex { color: var(--fg-2); } .provider-icon.jev { width: 12px; height: 12px; max-width: 12px; border-radius: 50%; object-fit: cover; } .row.on .provider-icon, .row:hover .provider-icon { opacity: 1; } /* whose session it is */
+.provider-icon { flex: none; opacity: .75; } .provider-icon.claude { color: var(--claude); } .provider-icon.codex, .provider-icon.zcode { color: var(--fg-2); } .provider-icon.jev { width: 12px; height: 12px; max-width: 12px; border-radius: 50%; object-fit: cover; } .row.on .provider-icon, .row:hover .provider-icon { opacity: 1; } /* whose session it is */
 .row-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row-listening { flex: none; display: inline-flex; color: var(--accent); margin-right: 2px; }
 .row-working { flex: none; display: inline-flex; } .row-working .mark { width: 17px; height: 17px; }
@@ -146,6 +147,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .voice-dock { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 2px 0 8px; }
 .orb-btn { border-radius: 50%; line-height: 0; transition: transform .2s; } .orb-btn:active { transform: scale(.97); }
 .orb-canvas { line-height: 0; } .orb-canvas canvas { display: block; }
+/* the orb without WebGL: the disc and the mark, still (Orb.tsx) */
+.orb-flat { display: block; } .orb-flat .ring { fill: none; stroke: #979dff; stroke-opacity: .35; stroke-width: 1.2; }
+.orb-flat .strand { fill: none; stroke-width: 7; stroke-linecap: round; } .orb-flat .over { stroke: #979dff; } .orb-flat .under { stroke: #ecebe3; }
+.orb-flat.mute .disc { filter: grayscale(1) brightness(.7); } .orb-flat.silent .strand { stroke: #9a9a96; }
 .dock-phase { margin: 6px 0 0; font-size: 13.5px; color: var(--muted); min-height: 20px; }
 .dock-heard { margin: 0; max-width: 640px; text-align: center; font-size: 13px; color: var(--faint); min-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voice-controls { position: relative; display: flex; align-items: center; justify-content: center; gap: 9px; margin: 0 0 12px; }

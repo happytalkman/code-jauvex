@@ -8,6 +8,14 @@ import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import { normalize, projectOr404, saveContext, saveState } from './backend.js';
 import { autoCompactPct, claudeCompactEnv, claudeUsed, tooLong, type ContextUsage } from '../shared/context.js';
 import * as codex from './codex.js';
+import * as zcode from './zcode.js';
+import * as claw from './claw.js';
+import * as graphdb from './graphdb.js';
+import * as paperclip from './paperclip.js';
+import { paperclipReadTool } from '../shared/paperclip.js';
+import { browseSetup, runBrowse } from '../shared/browse.js';
+import { typesafeKey } from './jev.js';
+import os from 'node:os';
 import { claudeExe } from './account.js';
 
 type Live = { push: (text: string, images?: Attachment[]) => void; q: Query; abort: AbortController; pending: Map<string, (d: PermissionDecision) => void>; always: Set<string>; projectId: string; sessionId: string | null };
@@ -24,7 +32,10 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   if (live.has(chatId)) throw new Error('This chat is already running.');
   const { state, project } = await projectOr404(req.projectId);
   // The session's provider decides who continues it; only a new session takes the one the UI asked for.
-  if ((req.sessionId ? providerOf(project, req.sessionId) : req.provider ?? 'claude') === 'codex') return codex.startChat(req, send);
+  const provider = req.sessionId ? providerOf(project, req.sessionId) : req.provider ?? 'claude';
+  if (provider === 'codex') return codex.startChat(req, send);
+  if (provider === 'zcode') return zcode.startChat(req, send);
+  if (provider === 'claw') return claw.startChat(req, send);
   const abort = new AbortController();
   // How full the context is (T-74): the last known numbers, then every request's. Claude Code compacts on its own when the setting's share
   // of the window is passed (in the middle of a long turn too); the window compacts between turns, and at once when a message did not fit.
@@ -41,7 +52,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   const entry: Live = { projectId: req.projectId, sessionId: req.sessionId, push: (text, images) => { steers.push(Date.now()); inbox.push(user(text, images)); wake?.(); }, q: undefined as unknown as Query, abort, pending: new Map(), always: new Set() };
 
   const canUseTool: CanUseTool = (toolName, input, opts) => new Promise<PermissionResult>((resolve) => {
-    if (entry.always.has(toolName) || toolName.startsWith('mcp__jauvex__')) return resolve({ behavior: 'allow', updatedInput: input }); /* the app's own tools (message_agent, list_agents) never ask: they only reach the app's router */
+    if (entry.always.has(toolName) || (toolName.startsWith('mcp__jauvex__') && toolName !== 'mcp__jauvex__browse') || paperclipReadTool(toolName)) return resolve({ behavior: 'allow', updatedInput: input }); /* browse acts on real sites, and Paperclip's writes change its company: those ask */ /* the app's own tools (message_agent, list_agents) never ask: they only reach the app's router */
     const requestId = randomUUID();
     const finish = (d: PermissionDecision) => {
       entry.pending.delete(requestId);
@@ -54,6 +65,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
     send({ chatId, type: 'permission', requestId, toolName, input });
   });
 
+  const pcServer = await paperclip.mcpServer().catch(() => null);
   entry.q = query({
     prompt: input(),
     options: {
@@ -69,7 +81,7 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
       permissionMode: req.permissions === 'auto' ? 'auto' : 'default',
       canUseTool,
       abortController: abort,
-      mcpServers: { jauvex: jauvexTools(chatId) }, // message_agent and list_agents: the app's own channel between agents, as a tool
+      mcpServers: { jauvex: jauvexTools(chatId), ...(pcServer ? { paperclip: pcServer } : {}) }, // paperclip: its own MCP server, when it runs and this app is connected (electron/paperclip.ts); // message_agent and list_agents: the app's own channel between agents, as a tool
     },
   });
   live.set(chatId, entry);
@@ -137,10 +149,10 @@ export async function startChat(req: ChatStart, send: (e: ChatEvent) => void): P
   }
 }
 
-/** Every turn running right now, Claude and Codex: a window that reloads takes them back by these ids. */
-export function liveList(): { chatId: string; projectId: string; sessionId: string | null }[] { return [...live.entries()].map(([chatId, l]) => ({ chatId, projectId: l.projectId, sessionId: l.sessionId })).concat(codex.liveList()); }
-/** Is a turn of this chat running in this process (Claude here, or Codex there)? The window asks when a hand-over fails. */
-export function isRunning(chatId: string): boolean { return live.has(chatId) || codex.isRunning(chatId); }
+/** Every turn running right now, Claude, Codex and ZCode: a window that reloads takes them back by these ids. */
+export function liveList(): { chatId: string; projectId: string; sessionId: string | null }[] { return [...live.entries()].map(([chatId, l]) => ({ chatId, projectId: l.projectId, sessionId: l.sessionId })).concat(codex.liveList(), zcode.liveList(), claw.liveList()); }
+/** Is a turn of this chat running in this process (Claude here, or Codex or ZCode there)? The window asks when a hand-over fails. */
+export function isRunning(chatId: string): boolean { return live.has(chatId) || codex.isRunning(chatId) || zcode.isRunning(chatId) || claw.isRunning(chatId); }
 /** Hand a message to the turn that is running, without interrupting it. False when there is no running turn to take it. */
 // ---------- the app's own tools for a Claude session: the same channel as the message-agent block (the window routes both), for the
 // models that look for a tool when the user says "talk to X" (one searched its harness and a chat skill instead). Answered by the window.
@@ -153,18 +165,24 @@ function jauvexTools(chatId: string) {
       { to: z.string().describe("The agent's name, or its id in brackets"), text: z.string().describe('What to tell or ask them: short and self-contained, they see nothing of your conversation') },
       async ({ to, text }) => ({ content: [{ type: 'text' as const, text: await agentRequest(chatId, { type: 'message', to, text }) }] })),
     tool('list_agents', 'The agents in this Jauvex app right now: name, id, provider, folder, working or idle.', {}, async () => ({ content: [{ type: 'text' as const, text: await agentRequest(chatId, { type: 'list' }) }] })),
+    tool('graph_query', 'Run one OpenCypher query on WEAIDdb, the graph database beside this app (shared by every agent): CREATE, MERGE, MATCH ... RETURN. Values go in parameters, referred to as $name in the query. Answers with the rows as JSON, or why there are none (not running, a syntax error). A subset of OpenCypher: every node has an integer id you choose (node scripts/graph.ts newid prints a fresh one); writes are CREATE or MERGE of a relationship path, changes MATCH ... SET, reads MATCH ... RETURN n.prop.',
+      { query: z.string().describe('One OpenCypher statement, e.g. MATCH (n:Note {project: $p}) RETURN n.text LIMIT 20'), parameters: z.record(z.string(), z.unknown()).optional().describe('Values for the $names in the query') },
+      async ({ query, parameters }) => { const r = await graphdb.query(query, parameters); return { content: [{ type: 'text' as const, text: r.text }], ...(r.ok ? {} : { isError: true }) }; }),
+    tool('browse', "Do one thing in a Chrome window of the app's own with the browser agent (jev-ultrafast): it opens the URL and works toward the goal on its own, clicking, typing and choosing, then says how it ended, each step, and what was on the last page. For tasks on real web pages (search a site, fill a form, find a page); it takes a minute or two. One narrow goal, and say when to stop.",
+      { url: z.string().describe('The page to start on, https://...'), goal: z.string().describe('What to do there, and when to stop, in one or two sentences'), max_seconds: z.number().optional().describe('Give up after this long (default 180)') },
+      async ({ url, goal, max_seconds }) => { const r = await runBrowse(browseSetup(os.homedir(), APP_ROOT), url, goal, await typesafeKey(), { maxSeconds: max_seconds ?? 180 }); return { content: [{ type: 'text' as const, text: r.text }], ...(r.ok ? {} : { isError: true }) }; }),
   ] });
 }
 export async function steerChat(chatId: string, text: string, images?: Attachment[]): Promise<boolean> {
-  const entry = live.get(chatId); if (!entry) return codex.steerChat(chatId, text, images);
+  const entry = live.get(chatId); if (!entry) return claw.isRunning(chatId) ? Promise.resolve(false) /* claw takes one message per run: the next waits */ : zcode.isRunning(chatId) ? zcode.steerChat(chatId, text, images) : codex.steerChat(chatId, text, images);
   entry.push(text, images); return true;
 }
 export function answerPermission(chatId: string, requestId: string, decision: PermissionDecision): boolean {
-  const finish = live.get(chatId)?.pending.get(requestId); if (!finish) return codex.answerPermission(chatId, requestId, decision); finish(decision); return true;
+  const finish = live.get(chatId)?.pending.get(requestId); if (!finish) return codex.answerPermission(chatId, requestId, decision) || zcode.answerPermission(chatId, requestId, decision); finish(decision); return true;
 }
 export async function stopChat(chatId: string): Promise<boolean> {
-  const entry = live.get(chatId); if (!entry) return codex.stopChat(chatId);
+  const entry = live.get(chatId); if (!entry) return claw.isRunning(chatId) ? claw.stopChat(chatId) : zcode.isRunning(chatId) ? zcode.stopChat(chatId) : codex.stopChat(chatId);
   try { await entry.q.interrupt(); } catch { /* not in a state that can be interrupted */ }
   entry.abort.abort(); return true;
 }
-export function stopAll(): void { for (const id of live.keys()) void stopChat(id); codex.stopAll(); }
+export function stopAll(): void { for (const id of live.keys()) void stopChat(id); codex.stopAll(); zcode.stopAll(); claw.stopAll(); }

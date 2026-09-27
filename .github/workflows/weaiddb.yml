@@ -1,0 +1,48 @@
+# WEAIDdb beside the app, for real: scripts/weaiddb.ps1 builds the image from the fork (github.com/happytalkman/WEAIDdb, its own Dockerfile)
+# and starts it as it does on Windows (Docker Desktop runs the same Linux container), then scripts/graph.ts writes and reads a small graph
+# through it, as an agent does. A Linux runner: GitHub's Windows runners cannot run Linux containers.
+name: weaiddb
+on:
+  push:
+    branches: ['claude/**', 'master']
+    paths: ['scripts/weaiddb.ps1', 'scripts/graph.ts', 'shared/graph.ts', 'electron/graphdb.ts', '.github/workflows/weaiddb.yml']
+  workflow_dispatch:
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Build the image from the fork and start it (scripts/weaiddb.ps1)
+        shell: pwsh
+        run: |
+          ./scripts/weaiddb.ps1 status
+          ./scripts/weaiddb.ps1 start
+          ./scripts/weaiddb.ps1 status
+      - name: An agent's round trip through scripts/graph.ts
+        shell: bash
+        run: |
+          set -e
+          node scripts/graph.ts status
+          node scripts/graph.ts 'CREATE (a {id: 1})-[:FOLLOWS]->(b {id: 2})'
+          out=$(node scripts/graph.ts 'MATCH (a {id: $id})-[:FOLLOWS]->(b) RETURN b.id AS id' --params '{"id":1}')
+          echo "$out"
+          echo "$out" | grep -q '"value":2' || { echo 'FAIL: the written edge did not come back'; exit 1; }
+          # the pattern the agents are briefed with (GRAPH_NOTE in shared/types.ts): ids from newid, a MERGE of a path, a SET, reads
+          P=$(node scripts/graph.ts newid); N=$(node scripts/graph.ts newid)
+          node scripts/graph.ts 'MERGE (p:Project {id: $pid, name: $name})-[:HAS_NOTE]->(n:Note {id: $nid, text: $text})' --params "{\"pid\":$P,\"name\":\"app\",\"nid\":$N,\"text\":\"first\"}"
+          node scripts/graph.ts 'MATCH (n:Note {id: $nid}) SET n.text = $text' --params "{\"nid\":$N,\"text\":\"edited\"}"
+          node scripts/graph.ts 'MATCH (p:Project) WHERE p.name = $name RETURN p.id AS id' --params '{"name":"app"}' | grep -q "\"value\":$P" || { echo 'FAIL: the project is not found by name'; exit 1; }
+          notes=$(node scripts/graph.ts 'MATCH (p:Project {id: $pid})-[:HAS_NOTE]->(n:Note) RETURN n.text AS text' --params "{\"pid\":$P}"); echo "$notes"
+          echo "$notes" | grep -q '"edited"' || { echo 'FAIL: the edited note did not come back'; exit 1; }
+          if node scripts/graph.ts 'MATCH (n) RETRN n'; then echo 'FAIL: a syntax error passed'; exit 1; else echo 'a syntax error is refused, as it should be'; fi
+          echo 'ALL PASS'
+      - name: The node's log
+        if: always()
+        run: docker logs --tail 60 weaiddb || true
+      - name: Stop it
+        if: always()
+        shell: pwsh
+        run: ./scripts/weaiddb.ps1 stop

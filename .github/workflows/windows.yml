@@ -1,0 +1,107 @@
+# The web version on real Windows: the one-line install from GitHub (scripts/windows-start.ps1) on a clean machine, then the app's
+# server driven over its API: the state, the voice's setup, Windows' own speech (System.Speech) and whisper-server hearing it.
+name: windows
+on:
+  push:
+    branches: ['claude/**', 'master']
+    paths: ['electron/claw.ts', 'electron/zcode.ts', 'scripts/windows-start.ps1', 'scripts/voice-setup.ts', 'electron/web.ts', 'electron/voice.ts', 'shared/web.ts', 'scripts/paperclip.ts', 'shared/paperclip.ts', 'shared/cli-json.ts', 'scripts/browse.ts', 'shared/browse.ts', 'scripts/graph.ts', 'package.json', '.github/workflows/windows.yml']
+  workflow_dispatch:
+jobs:
+  web:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['as-it-comes', '22', '24']  # 22: the install moves it to 24 for ZCode
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      JAUVEX_BRANCH: ${{ github.ref_name }}
+      JAUVEX_NO_START: '1'
+      JAUVEX_WEAIDDB: '0'  # a Linux container: this runner's Docker runs Windows ones (.github/workflows/weaiddb.yml checks it)
+    steps:
+      - if: matrix.node != 'as-it-comes'
+        uses: actions/setup-node@v4
+        with: { node-version: '${{ matrix.node }}' }
+      - name: What the machine has
+        shell: powershell
+        run: |
+          node -v; git --version; $PSVersionTable.PSVersion.ToString()
+          if (Get-Command winget -ErrorAction SilentlyContinue) { 'winget: yes' } else { 'winget: no' }
+      - name: The one-line install, as a user runs it
+        shell: powershell
+        run: |
+          $env:JAUVEX_DIR = Join-Path $env:RUNNER_TEMP 'jauvex'  # the runner context is not there in a job's env
+          irm "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/windows-start.ps1" | iex
+      - name: Start the app and drive it
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # the Node the install chose (it may have put one first on the PATH)
+          if (-not ((node -v) -match '^v(2[4-9]|[3-9]\d)\.')) { $env:Path = "$env:ProgramFiles\nodejs;" + [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path }
+          $env:Path = (Join-Path $HOME '.jauvex\bin') + ";$env:Path"  # the zcode command the install made (on the user's PATH, which a step does not reread)
+          $env:JAUVEX_DIR = Join-Path $env:RUNNER_TEMP 'jauvex'; Set-Location $env:JAUVEX_DIR; node -v
+          $data = Join-Path $env:RUNNER_TEMP 'jxdata'; New-Item -ItemType Directory -Force $data | Out-Null
+          $env:CVC_DATA_DIR = $data; $env:CVC_WEB_OPEN = '0'; $env:CVC_WEB_TOKEN = 'ci-token'; $env:CVC_WEB_PORT = '4343'
+          $log = Join-Path $env:RUNNER_TEMP 'web.log'
+          $p = Start-Process npm.cmd -ArgumentList 'run', 'web' -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -NoNewWindow
+          $fails = 0; function Check($name, $ok, $got) { if ($ok) { Write-Host "PASS $name" } else { Write-Host "FAIL $name $got" -ForegroundColor Red; $script:fails++ } }
+          try {
+            $t = 0; while (-not ((Get-Content $log -Raw -ErrorAction SilentlyContinue) -match 'runs in your browser')) { Start-Sleep 2; $t += 2; if ($t -gt 300 -or $p.HasExited) { Get-Content $log, "$log.err" -ErrorAction SilentlyContinue; throw 'the web server did not start' } }
+            Check 'npm run web starts the server' $true ''
+            function Rpc($name, $argsList) { $body = @{ name = $name; args = $argsList; undef = @() } | ConvertTo-Json -Depth 8 -Compress; (Invoke-RestMethod -Uri 'http://127.0.0.1:4343/rpc' -Method Post -ContentType 'application/json' -Headers @{ 'x-jauvex-token' = 'ci-token' } -Body $body -TimeoutSec 120) }
+            $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:4343/' -TimeoutSec 30
+            Check 'the page is served' ($page.StatusCode -eq 200 -and $page.Content -match '<div id="root">') $page.StatusCode
+            $st = Rpc 'api' @('state'); Check 'the backend answers' ($st.ok) ($st | ConvertTo-Json -Depth 3 -Compress)
+            # the app's own agent, in <home>\.jauvex as on a user's machine (no CVC_JAUVEX_HOME): its folder is made and it is in the state (the sidebar's Jauvex row)
+            $jx = Rpc 'api' @('jauvexProject'); Write-Host "jauvexProject: $($jx | ConvertTo-Json -Depth 4 -Compress)"
+            Check 'the Jauvex agent is there' ($jx.ok -and $jx.value.builtin -eq 'jauvex') "$($jx.error)"
+            $st2 = (Rpc 'api' @('state')).value; Check '... and stays in the state' (@($st2.projects | Where-Object { $_.builtin -eq 'jauvex' }).Count -eq 1) ($st2 | ConvertTo-Json -Depth 4 -Compress)
+            $ss = Rpc 'api' @('sessions', $jx.value.id); Check '... and its sessions can be listed' ($ss.ok) "$($ss.error)"
+            # ZCode, built by the install: the app finds its command and its server answers; no sign-in here, so it asks for one
+            $zs = (Rpc 'account:status' @('zcode')).value; Write-Host "zcode: $($zs | ConvertTo-Json -Compress)"
+            Check 'ZCode: the app finds the zcode command' ($zs.method -match '^ZCode CLI') "$($zs.method) $($zs.error)"
+            Check '... its server answers, and it asks for a sign-in' ($zs.error -match 'no model to run on') "$($zs.error)"
+            # Claw, fetched by the install: the app finds claw.exe; no API key here, so it says how to set one
+            $cs = (Rpc 'account:status' @('claw')).value; Write-Host "claw: $($cs | ConvertTo-Json -Compress)"
+            Check 'Claw: the app finds claw.exe' ($cs.method -match '^claw ') "$($cs.method) $($cs.error)"
+            Check '... and asks for an API key' ((-not $cs.signedIn) -and $cs.error -match 'ANTHROPIC_API_KEY') "$($cs.error)"
+            # Paperclip, started and connected by the install: running, this app in its company, its issues readable with the kept key
+            $ErrorActionPreference = 'Continue'
+            $env:CVC_DATA_DIR = $null  # the setup connected this app in the user's data folder (<home>\.jauvex\personal), as on a user's machine
+            function FromJson($t) { try { $t | ConvertFrom-Json } catch { Write-Host "not JSON: $t"; $null } }
+            $pcs = FromJson (node scripts\paperclip.ts status | Out-String); Write-Host "paperclip: $($pcs | ConvertTo-Json -Compress)"
+            Check 'Paperclip runs, and this app is connected to its company' ($pcs.up -and $pcs.connected) ''
+            $iss = node scripts\paperclip.ts GET '/api/companies/{companyId}/issues'; Check '... its issues come back with the kept key' ($LASTEXITCODE -eq 0 -and "$iss".TrimStart().StartsWith('[')) "$iss"
+            # JSON piped in (-): Windows PowerShell drops the quotes of a JSON argument, and says so when given one
+            $lost = node scripts\paperclip.ts POST '/api/companies/{companyId}/issues' '{"title":"x"}' 2>&1 | Out-String; Check 'a JSON argument that lost its quotes is said as such' ($lost -match 'lost its double quotes') "$lost"
+            $new = FromJson ('{"title":"Windows check"}' | node scripts\paperclip.ts POST '/api/companies/{companyId}/issues' - | Out-String)
+            $cm = FromJson ('{"body":"from the Windows check"}' | node scripts\paperclip.ts POST "/api/issues/$($new.id)/comments" - | Out-String)
+            Check '... an issue opened, and a comment on it (as the board, marked)' ($new.id -and $cm.body -eq '[from Jauvex] from the Windows check') "$($cm | ConvertTo-Json -Compress)"
+            # the browser agent, set up by the install: its clone and environment are there; without a TypeSafe key it says so
+            $env:Path = "$HOME\.local\bin;$env:Path"
+            Check 'the browser agent (jev-ultrafast) is cloned and synced' ((Test-Path "$HOME\jev-ultrafast\pyproject.toml") -and (Test-Path "$HOME\jev-ultrafast\.venv")) ''
+            $b = node scripts\browse.ts --url https://example.com --goal 'Open it' 2>&1 | Out-String; Check '... and without a TypeSafe key it says so' ($b -match 'needs a TypeSafe key') "$b"
+            # ... and it starts a Chrome of its own (its profile, port 9333), where browser-harness attaches
+            $eb = FromJson (node scripts\browse.ts --open | Out-String)
+            Check '... it starts a Chrome of its own, on its port, and it answers' ($eb.ok -and $eb.cdp -eq 'http://127.0.0.1:9333' -and "$($eb.browser)" -match 'Chrome|Edg') "$($eb | ConvertTo-Json -Compress)"
+            $ErrorActionPreference = 'Stop'
+            $sc = (Rpc 'setup:check' @()).value; Write-Host ($sc | ConvertTo-Json -Compress)
+            Check 'setup: on Windows, speech is the system''s' ($sc.os -eq 'win32' -and $sc.say -and $sc.voice -eq 'system') ''
+            Check 'setup: whisper-server is found' ($sc.whisperBinary) ''
+            Check 'setup: the models are there' ($sc.models.Count -ge 1) ($sc.models -join ',')
+            $sp = Rpc 'voice:speak' @('Hello from Windows.', '', 185); $wav = [Convert]::FromBase64String($sp.value.'$ab')
+            Check 'Windows speaks: a WAV comes back' ($wav.Length -gt 10000 -and [Text.Encoding]::ASCII.GetString($wav, 0, 4) -eq 'RIFF') "$($wav.Length) bytes $($sp.error)"
+            $on = Rpc 'voice:on' @($true, 'ci'); $t = 0
+            do { Start-Sleep 2; $t += 2; $vs = (Rpc 'voice:status' @()).value } while ($vs.whisper -eq 'starting' -and $t -lt 180)
+            Check 'whisper-server starts' ($vs.whisper -eq 'ready') "$($vs.whisper): $($vs.detail)"
+            # a sentence spoken by Windows, 16 kHz as the browser sends it, heard by whisper-server
+            Add-Type -AssemblyName System.Speech; $f = Join-Path $env:RUNNER_TEMP 'said.wav'; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+            $s.SetOutputToWaveFile($f, (New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo 16000, ([System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen), ([System.Speech.AudioFormat.AudioChannel]::Mono))); $s.Speak('Please open the settings and start a new agent.'); $s.Dispose()
+            $heard = Rpc 'voice:transcribe' @(@{ '$ab' = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f)) }, 'en'); Write-Host "heard: $($heard.value.text) $($heard.error)"
+            Check 'whisper-server hears what Windows said' ($heard.value.text -match 'settings') "$($heard.value.text) $($heard.error)"
+            Rpc 'voice:on' @($false, 'ci') | Out-Null
+          } finally {
+            taskkill /PID $p.Id /T /F | Out-Null  # this server's tree, by its pid
+            Write-Host '--- server log'; Get-Content $log, "$log.err" -ErrorAction SilentlyContinue | Select-Object -Last 40
+          }
+          if ($fails) { throw "$fails FAILED" } else { Write-Host 'ALL PASS' }

@@ -25,15 +25,15 @@ let server: Server | null = null;
 // The npm package ships the native binary per platform, plus the tools it expects on its PATH (rg).
 function findCodex(): { bin: string; pathDir: string | null } {
   if (process.env.CVC_CODEX_BIN) return { bin: process.env.CVC_CODEX_BIN, pathDir: null }; // the stand-in (tests/mock/codex): checks with no account
-  const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-${process.platform === 'darwin' ? 'apple-darwin' : 'unknown-linux-musl'}`;
+  const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-${process.platform === 'darwin' ? 'apple-darwin' : process.platform === 'win32' ? 'pc-windows-msvc' : 'unknown-linux-musl'}`;
   const vendor = path.join(ROOT, 'node_modules', '@openai', `codex-${process.platform}-${process.arch}`, 'vendor', triple);
-  const bin = path.join(vendor, 'bin', 'codex');
+  const bin = path.join(vendor, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');
   return existsSync(bin) ? { bin, pathDir: path.join(vendor, 'codex-path') } : { bin: 'codex', pathDir: null }; // else: whatever `codex` the shell PATH has
 }
 
 function boot(): Server {
   const { bin, pathDir } = findCodex();
-  const child = spawn(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...(pathDir ? { PATH: `${pathDir}:${process.env.PATH ?? ''}` } : {}) } });
+  const child = spawn(bin, ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...(pathDir ? { PATH: `${pathDir}${path.delimiter}${process.env.PATH ?? ''}` } : {}) } });
   const s: Server = { child, nextId: 1, waiting: new Map(), ready: Promise.resolve() };
   let stderr = ''; child.stderr?.on('data', (d: Buffer) => { stderr = (stderr + d.toString()).slice(-600); });
   const down = (why: string) => {
@@ -41,7 +41,7 @@ function boot(): Server {
     for (const w of s.waiting.values()) w.reject(new Error(why)); s.waiting.clear();
     for (const t of turns.values()) if (t.server === s) t.fail(why);
   };
-  child.on('error', (e) => down(`Codex could not start: ${e.message}`));
+  child.on('error', (e) => down((e as NodeJS.ErrnoException).code === 'ENOENT' ? 'Codex could not start: the codex command was not found. The app brings it with its packages: run npm install in the app\'s folder, then sign in with codex login.' : `Codex could not start: ${e.message}`)); // no such command: in words, not "spawn codex ENOENT"
   child.on('exit', (code) => down(`Codex stopped (${code ?? 'signal'}). ${stderr.split('\n').slice(-2).join(' ')}`.trim()));
   readline.createInterface({ input: child.stdout! }).on('line', (line) => {
     let m: Rpc; try { m = JSON.parse(line) as Rpc; } catch { return; }

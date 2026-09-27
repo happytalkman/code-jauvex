@@ -8,6 +8,7 @@ import { DATA_DIR } from './paths.js';
 import { execFileSync } from 'node:child_process';
 import { watch as fsWatch, existsSync, unlinkSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { Attachment, ChatEvent, ChatStart, DebugEvent, PermissionDecision, Provider } from '../shared/types.js';
+import { externalOk } from '../shared/opencut.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url)); // dist-electron/
 const ROOT = path.resolve(here, '..');
@@ -147,7 +148,7 @@ app.whenReady().then(async () => {
     setTimeout(() => app.exit(0), auto ? 1500 : 200); return true;
   });
   ipcMain.handle('app:restart', () => { app.releaseSingleInstanceLock(); app.relaunch(); setTimeout(() => app.exit(0), 300); return true; });
-  ipcMain.handle('open:external', (_e, url: string) => (/^(https:\/\/|x-apple\.systempreferences:)/.test(url) ? shell.openExternal(url).then(() => true) : false)); // web pages, and System Settings panes (the welcome opens Spoken Content)
+  ipcMain.handle('open:external', (_e, url: string) => (externalOk(url) || /^x-apple\.systempreferences:/.test(url) ? shell.openExternal(url).then(() => true) : false)); // web pages, this machine's own servers (OpenCut), and System Settings panes (the welcome opens Spoken Content)
   ipcMain.handle('chat:start', (_e, req: ChatStart) => { void chat.startChat(req, (ev: ChatEvent) => win?.webContents.send('chat:event', ev)).catch((err: Error) => win?.webContents.send('chat:event', { chatId: req.chatId, type: 'done', ok: false, error: err.message } satisfies ChatEvent)); return true; });
   ipcMain.handle('usage:get', (_e, provider: Provider, force?: boolean) => usage.get(provider, force));
   ipcMain.handle('chat:running', (_e, chatId: string) => chat.isRunning(chatId));
@@ -217,8 +218,8 @@ app.whenReady().then(async () => {
   ipcMain.on('voice:type', (_e, text: string) => { win?.webContents.send('voice:type', String(text)); }); // typed in the tiny bar: to the listening chat, without bringing the app forward
   ipcMain.on('mini:size', (_e, w: number) => { if (!mini) return; const [, h] = mini.getSize(); mini.setSize(Math.max(200, Math.round(w)), h ?? 72, true); }); // the bar grows for its typing box (animated on macOS)
   ipcMain.on('voice:cmd', (_e, cmd: string) => { if ((cmd === 'focus' || cmd === 'new') && !HIDDEN) { win?.show(); win?.focus(); } /* an automated check never comes to the front */ win?.webContents.send('voice:cmd', cmd); });
-  const codex = await import('./codex.js');
-  app.on('before-quit', () => { chat.stopAll(); voice.shutdown(); account.shutdown(); codex.shutdown(); });
+  const codex = await import('./codex.js'); const zcode = await import('./zcode.js'); const claw = await import('./claw.js');
+  app.on('before-quit', () => { chat.stopAll(); voice.shutdown(); account.shutdown(); codex.shutdown(); zcode.shutdown(); claw.stopAll(); });
   await createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
 });

@@ -29,6 +29,7 @@ export const api = {
   jevDelete: (id: string, agentId: string) => call<boolean>('jevDelete', id, agentId),
   jevEvaluate: (id: string, agentId: string, state: string, questions: string) => call<JevRun>('jevEvaluate', id, agentId, state, questions),
   rename: (id: string, sid: string, title: string) => call<boolean>('rename', id, sid, title),
+  opencutUp: (url: string) => call<boolean>('opencutUp', url),
   models: (provider: Provider) => call<ModelOption[]>('models', provider),
 };
 export const pickFolder = () => window.desktop.pickFolder();

@@ -1,5 +1,5 @@
 // The roster helpers: session titles cut short, short ids that stay unique, and the agent a message is addressed to.
-const { shortTitle, shortIds, findAgents } = await import('../shared/roster.ts');
+const { shortTitle, shortIds, findAgents, newChatProvider, newAgentProvider } = await import('../shared/roster.ts');
 let failed = 0; const check = (name: string, ok: boolean, got = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${got ? `: ${got}` : ''}`); if (!ok) failed++; };
 const dictated = "Hey, you're going to take care of helping me with the Jauvex development. So basically the name of this application development. So you're going to be the Jauvex development agent.";
 const t = shortTitle(dictated);
@@ -24,4 +24,20 @@ check('an unknown name finds nobody', findAgents(all, 'Nobody Here').length === 
   check('a name with a word more finds the agent it holds', findAgents(all, 'Acme Creative Agent').map((a) => a.name).join() === 'Creative Agent');
   check('the longest name held wins', findAgents(all, 'the Acme Video Agent').map((a) => a.name).join() === 'Acme Video Agent');
   check('a name holding nobody finds nobody', findAgents(all, 'Acme Legal Agent').length === 0); }
+{ // the provider of a new chat: `new-agent --provider zcode` (and claw) opened a Claude chat, the window knew only Claude and Codex
+  const all = { claude: true, codex: true, zcode: true, claw: true };
+  check('a new chat takes ZCode when ZCode was chosen', newChatProvider('zcode', all) === 'zcode', newChatProvider('zcode', all));
+  check('a new chat takes Claw when Claw was chosen', newChatProvider('claw', all) === 'claw', newChatProvider('claw', all));
+  check('a new chat takes ZCode even with only Claude signed in', newChatProvider('zcode', { ...all, codex: false }) === 'zcode');
+  check('Codex chosen, Codex it is', newChatProvider('codex', all) === 'codex');
+  check('nothing chosen, Claude', newChatProvider(null, all) === 'claude' && newChatProvider('nonsense', all) === 'claude');
+  check('only Codex signed in and Claude chosen: Codex', newChatProvider('claude', { ...all, claude: false }) === 'codex'); }
+{ // `new-agent --provider codex` with Codex not signed in (a real run, 2026-09-27): it answered "provider": "codex" and opened a Claude chat.
+  const all = { claude: true, codex: true, zcode: true, claw: true }; const onlyClaude = { ...all, codex: false, zcode: false, claw: false };
+  const asked = newAgentProvider('codex', true, onlyClaude);
+  check('a provider asked for by name and not signed in: refused, and said how to sign in', 'error' in asked && /Codex is not signed in/.test(asked.error) && /codex login/.test(asked.error), JSON.stringify(asked));
+  const z = newAgentProvider('zcode', true, onlyClaude), c = newAgentProvider('claw', true, onlyClaude);
+  check('... ZCode and Claw too, each with what it needs', 'error' in z && /zcode/.test(z.error) && 'error' in c && /ANTHROPIC_API_KEY/.test(c.error), JSON.stringify([z, c]));
+  check('a provider asked for by name and signed in: that one', JSON.stringify(newAgentProvider('codex', true, all)) === '{"provider":"codex"}');
+  check('none named: the default, or the one signed in, and the answer says which', JSON.stringify(newAgentProvider('codex', false, onlyClaude)) === '{"provider":"claude"}' && JSON.stringify(newAgentProvider('claude', false, all)) === '{"provider":"claude"}'); }
 console.log(failed ? `${failed} FAILED` : 'ALL PASS'); process.exit(failed ? 1 : 0);

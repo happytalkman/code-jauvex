@@ -22,3 +22,5 @@ export function resetText(at: number | null, now: number, clock: (at: number, fa
 
 /** A plan as the provider names it ("max", "pro") written for a person: "Max". */
 export const planName = (plan: string): string => plan.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+/** "Not available: <why>." with one full stop: the reasons the providers give often end with their own. */
+export const notAvailable = (why: string | undefined): string => `Not available: ${(why ?? 'no usage information for this account').trim().replace(/[.\s]+$/, '')}.`;

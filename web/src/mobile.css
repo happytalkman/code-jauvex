@@ -1,0 +1,52 @@
+/* The phone's screen (Mobile.tsx), in the look of MARK Mobile: a deep navy night, one cyan, soft rounded bubbles. */
+.mobile { --m-bg: rgb(6, 10, 19); --m-cyan: rgb(77, 230, 242); --m-orange: rgb(255, 159, 67); --m-text: #e8edf4; --m-muted: #8b95a5;
+  position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--m-bg); color: var(--m-text);
+  font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.mobile button { font: inherit; color: inherit; cursor: pointer; }
+.m-nav { display: flex; align-items: center; padding: max(env(safe-area-inset-top), 10px) 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.m-title { flex: 1; text-align: center; font-weight: 600; font-size: 16px; letter-spacing: 0.02em; }
+.m-icon { background: none; border: 0; width: 38px; height: 38px; border-radius: 10px; font-size: 18px; color: var(--m-cyan); }
+.m-icon.on { background: rgba(77,230,242,0.08); }
+.m-status { display: flex; align-items: center; gap: 8px; padding: 12px 20px; font-size: 12px; color: var(--m-muted); }
+.m-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--m-orange); }
+.m-dot.ok { background: var(--m-cyan); }
+.m-grow { flex: 1; }
+.m-tag { font: 500 9px/1 ui-monospace, "SF Mono", Menlo, monospace; color: var(--m-cyan); letter-spacing: 0.08em; }
+.m-drawer { position: absolute; top: 92px; left: 0; right: 0; bottom: 0; z-index: 5; overflow-y: auto; padding: 8px 16px 24px; background: var(--m-bg); }
+.m-folder { display: flex; align-items: center; justify-content: space-between; margin: 18px 4px 6px; font-size: 12px; font-weight: 600; color: var(--m-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.m-small { background: rgba(77,230,242,0.08); border: 0; border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--m-cyan); text-transform: none; letter-spacing: 0; }
+.m-kinds { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
+.m-kind { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.06); border: 0; border-radius: 12px; padding: 8px 12px; font-size: 14px; }
+.m-agent { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-radius: 14px; padding: 12px; font-size: 15px; }
+.m-agent span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.m-agent.sel { background: rgba(77,230,242,0.08); }
+.m-muted { color: var(--m-muted); font-size: 14px; }
+.m-thread { flex: 1; overflow-y: auto; padding: 8px 20px 20px; display: flex; flex-direction: column; gap: 18px; }
+.m-welcome { margin: 40px 0 0; color: var(--m-muted); font-size: 14px; }
+.m-hello { color: var(--m-text); font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+.m-bubble { padding: 16px; border-radius: 18px; }
+.m-bubble.me { background: rgba(255,255,255,0.08); }
+.m-bubble.agent { background: rgba(77,230,242,0.06); }
+.m-bubble.error { background: rgba(255,99,99,0.1); }
+.m-who { font-size: 12px; font-weight: 700; margin-bottom: 8px; color: var(--m-muted); }
+.m-bubble.agent .m-who { color: var(--m-cyan); }
+.m-text { white-space: pre-wrap; word-break: break-word; line-height: 1.6; user-select: text; }
+.m-tools { font-size: 12px; color: var(--m-muted); margin-bottom: 6px; }
+.m-note { align-self: center; max-width: 90%; font-size: 13px; color: var(--m-muted); background: rgba(255,255,255,0.04); border-radius: 12px; padding: 8px 12px; text-align: center; }
+.m-thinking { font-size: 12px; color: var(--m-cyan); }
+.m-ask { padding: 14px; border-radius: 18px; border: 1px solid rgba(255,159,67,0.4); background: rgba(255,159,67,0.06); }
+.m-ask pre { margin: 0 0 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; color: var(--m-muted); max-height: 140px; overflow: auto; }
+.m-row { display: flex; gap: 10px; }
+.m-allow, .m-deny { flex: 1; border: 0; border-radius: 12px; padding: 10px; font-weight: 600; }
+.m-allow { background: var(--m-cyan); color: var(--m-bg) !important; }
+.m-deny { background: rgba(255,255,255,0.08); }
+.m-error { display: flex; align-items: center; gap: 8px; padding: 8px 20px; font-size: 12px; color: var(--m-orange); }
+.m-error span { flex: 1; }
+.m-composer { display: flex; align-items: center; gap: 10px; padding: 10px 16px max(env(safe-area-inset-bottom), 12px); border-top: 1px solid rgba(255,255,255,0.06); }
+.m-input { flex: 1; min-width: 0; background: rgba(255,255,255,0.08); border: 0; border-radius: 22px; padding: 11px 16px; font: inherit; color: var(--m-text); outline: none; }
+.m-input::placeholder { color: var(--m-muted); }
+.m-mic, .m-send { width: 42px; height: 42px; flex: none; border: 0; border-radius: 50%; font-size: 18px; }
+.m-mic { background: rgba(255,255,255,0.08); }
+.m-mic.on { background: var(--m-orange); color: var(--m-bg) !important; }
+.m-send { background: var(--m-cyan); color: var(--m-bg) !important; font-weight: 700; }
+.m-send:disabled { opacity: 0.35; cursor: default; }

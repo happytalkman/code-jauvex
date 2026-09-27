@@ -27,6 +27,183 @@ repository instead: `npm start` runs it from the clone, and `npm run app` makes 
 (`scripts/mac-app.ts`: Electron's app renamed Jauvex, with the built app, the Whisper models, Claude and Codex inside, signed
 ad hoc on your Mac).
 
+## The web version (Windows)
+
+Where the desktop app does not run, the same app runs in a browser, by text and by voice. On Windows, with Node 22.18 or newer and Git:
+
+```
+git clone <this repository> jauvex && cd jauvex
+npm install
+npm run voice:setup   # once, for the voice: whisper-server and the two Whisper models (about 250 MB)
+npm run web
+```
+
+Or all of it, ZCode included, in one command in PowerShell (`scripts/windows-start.ps1`; later, `start-windows.cmd` in the app's folder):
+
+```
+irm https://raw.githubusercontent.com/happytalkman/code-jauvex/claude/awesome-pasteur-ndvvom/scripts/windows-start.ps1 | iex
+```
+
+It installs what is missing (Node and Git with winget), gets the app into `<home>\jauvex`, installs it, sets up the voice, and builds
+ZCode's CLI from its source into `<home>\zcode` (Node 24 and pnpm, through npx: `corepack enable` needs an administrator on Windows),
+with a `zcode` command in `<home>\.jauvex\bin` added to the user's PATH; ZCode is rebuilt only when its source moved, and
+`JAUVEX_ZCODE=0` leaves it out. Claw comes as `claw.exe` in the same folder: claw-code publishes no release and building it needs Rust and
+Microsoft's C++ build tools, so `.github/workflows/claw-windows.yml` builds it from the pinned claw-code commit on a Windows runner and
+publishes it, with claw's MIT license, as this repository's release `claw-08106b0`; the setup downloads it and checks its size and
+SHA-256 (a published file is never replaced: a rebuild is not byte for byte the same). `JAUVEX_CLAW=0` leaves it out. The same
+workflow runs a whole turn with that claw.exe, its prompt on stdin as the app sends it, against `tests/mock/anthropic.ts` (a stand-in for
+the Anthropic API that answers and logs every request): claw's own mock service took the connection on Windows but closed it silently,
+since it drops any request it cannot place, and claw said only "error sending request". On Linux the same claw commit runs whole turns in
+the app (`tests/claw-provider.test.ts`). What stays the user's: signing in (`zcode login zai`, `claude auth login`, `codex login`) and Claw's key (`setx ANTHROPIC_API_KEY sk-ant-...`). It also sets up the browser agent (uv with winget, jev-ultrafast cloned into `<home>\jev-ultrafast` and synced; its text-model key goes in that clone's `.env`) and Paperclip (Node 24.11 or newer; started in the background, its onboarding the first time, then `scripts/paperclip.ts connect`). `JAUVEX_BROWSER=0` and `JAUVEX_PAPERCLIP=0` leave them out.
+`.github/workflows/windows.yml` runs that command on a clean Windows runner on every change to it: the install, then the app driven over
+its API (the page, the Jauvex agent, ZCode found and asking for a sign-in, Windows' speech, whisper-server hearing it).
+
+`npm run web` builds the window, starts a small local server (`electron/web.ts`, no Electron) and opens the browser on the link it
+prints, `http://127.0.0.1:4343/?token=...`. Stop it with Ctrl+C; start it again the same way. Sign in to the agents with their own
+command lines first, as on a Mac (`claude auth login`, `codex login`; ZCode's `zcode` on the PATH). A folder is added by typing its
+path (a browser has no folder dialog); images are attached with the paperclip, pasted or dropped.
+
+**On a phone.** `npm run web:lan` (or `CVC_WEB_LAN=1 npm run web` on a Mac; Windows' cmd cannot set a variable that way) also listens
+on this computer's LAN addresses and prints, for each, the phone's link `http://<address>:4343/mobile?token=...` with its network's name
+(Windows lists virtual ones too, WSL or Hyper-V: take the Wi-Fi's): open it on a phone on the same Wi-Fi. On Windows, allow Node.js
+through the firewall on private networks and set the Wi-Fi as a private network. No app to install: the phone's browser is enough. Every call still needs the token, and a Host that is not
+one of this machine's own addresses is still refused (`allowedHost` in `shared/web.ts`), but the token travels in plain HTTP on that
+network: use a trusted one. Off by default.
+
+The phone's screen (`/mobile`, `web/src/Mobile.tsx`) is in the look of MARK Mobile (github.com/happytalkman/weaid-mobile-, a SwiftUI chat:
+a navy night, one cyan, "나" and the agent's name over rounded bubbles) and is run by this app: the menu lists the folders and their
+agents and opens a new one of any kind; every sentence is first read as a possible order for the app (a new agent, a pause, a goodbye,
+Korean too; a restart is refused there, since the phone could not start the server again), words said during a turn are triaged (steer,
+queue, stop, replace), Jev's quick line comes at once, tools ask with a card, and the answer is read aloud (the voice model's summary, else
+its first sentences, `shared/mobile.ts`). It listens and speaks with the phone's own browser speech (Korean by default; each line in its
+own language), not with Whisper on the computer.
+
+How it works: the server answers the window's calls by the same channel names as the desktop app's IPC (`POST /rpc`) and sends what the
+main process would send to the window as server-sent events (`GET /events`); the window gets its `window.desktop` from
+`web/src/webDesktop.ts` instead of the preload. `tests/web.test.ts` keeps the two in step: every channel of `electron/preload.ts` must have
+a handler in `electron/web.ts`, and every method a counterpart in the browser bridge. JSON turns an undefined argument into null, which the
+IPC does not: the window says which arguments were undefined and the server restores them (`shared/web.ts`); without it a reopened session
+showed an empty page. It listens on 127.0.0.1 only; every call needs the token of this run, and a request whose Host is not this machine's
+is refused (no other site reaches it by DNS tricks). One copy per data folder, like the desktop app: a lock (`web.lock`, with its pid) and
+no start while the desktop app holds that folder. `CVC_WEB_PORT` moves it off 4343, `CVC_WEB_OPEN=0` does not open the browser. Not in
+the web version: the floating voice bar, a file's page or PDF in the right pane, opening a file with the system. Web pages do open in the
+right pane there, in an iframe (the page's CSP allows https and this machine's own servers as frames); a site that forbids framing shows
+the browser's refusal, and the pane's button opens it in a new tab.
+
+The voice in the web version is the desktop's, with the microphone in the browser: the tab listens (the same VAD, `web/src/voice.ts`; the
+browser asks for the microphone once, and 127.0.0.1 counts as a secure page), the server hears and speaks. A recording travels to the server
+as base64 inside the JSON call and a spoken line comes back the same way (`packBinary` in `shared/web.ts`), byte for byte. Hearing is the
+same whisper-server: `npm run voice:setup` fetches whisper.cpp's own Windows build (pinned to v1.8.7 by size and SHA-256; later releases
+publish no Windows zip) into `whisper/`, unpacks it with Node alone, and fetches the models `scripts/models.sh` lists, each checked, a cut
+download never kept. Speaking on Windows is the system's own voice: System.Speech through PowerShell renders each line to a WAV file on the
+server, as `say` does on a Mac, so the voice stays the system's default (Settings > Time & language > Speech) and a line can still be cut
+short when the user speaks. The browser's speechSynthesis was not used: it plays but gives no audio back, and the voice channel needs the
+audio (its length, the cut when the user talks). `tests/web.test.ts` runs the voice on stand-ins (`tests/mock/whisper-server`,
+`tests/mock/say`), `tests/voice-setup.test.ts` the setup on zips it builds (a cut download, a wrong checksum and a path outside the folder
+are refused). `scripts/jauvex.ts`
+works as with the desktop app while a browser tab is open. On Windows, Claude and Codex come from their own Windows packages
+(`claude-agent-sdk-win32-*`, `codex-win32-*`, installed by `npm install`), and ZCode's `zcode.cmd` is started through the shell.
+
+## OpenCut beside the app
+
+OpenCut, the open-source video editor (MIT, github.com/opencut-app/opencut-classic), runs beside the app, not inside it: nothing of it
+is copied here. Install and start it on its own, once (it needs Bun, and Docker for its database and Redis):
+
+```
+git clone https://github.com/opencut-app/opencut-classic opencut && cd opencut
+cp apps/web/.env.example apps/web/.env.local        # Windows: Copy-Item apps/web/.env.example apps/web/.env.local
+docker compose up -d db redis serverless-redis-http
+bun install
+bun dev:web                                          # http://localhost:3000
+```
+
+The sidebar's OpenCut item opens it in the right pane of the session on screen, desktop and web version alike, so an agent's chat and the
+editor sit side by side. When it does not answer, the pane says how to start it, with a button to try again (the backend asks first:
+`opencutUp`). In the desktop app every page in the pane is muted from the start; OpenCut's pane alone gets its sound back once it is up (a
+video editor has to be heard; with the voice on, keep the volume low or the microphone hears it). In the settings (the wheel): its address
+(`localhost:3000` by default; a port alone, a host and port, or a full http(s) address; anything else is refused, a `javascript:` address
+would run in the pane) and its folder, which is added to the sidebar like any other, so the agents work on OpenCut's code there. The same
+from the command line: `node scripts/jauvex.ts settings --opencut-url 3000 --opencut-folder ~/code/opencut`, and `opencut` to open it.
+Links to this machine's own servers (http://localhost and the like) may now open in the system's browser too; other http addresses still
+may not (`externalOk` in `shared/opencut.ts`). Checks: `tests/opencut.test.ts` (the address, the links, the page's frame rule),
+`tests/web.test.ts` (the probe), `tests/window/opencut.test.ts` (the item, the pane, the sound, the folder).
+
+## WEAIDdb, a graph database for the agents
+
+[WEAIDdb](https://github.com/happytalkman/WEAIDdb) (a fork of HydraDB: a distributed graph database in Rust, queried with OpenCypher,
+Neo4j-compatible over Bolt, AGPL-3.0) runs beside the app, and every agent can use it to keep and query what is worth remembering as
+nodes and relationships. Nothing of it is copied here (the AGPL would then cover the app): it runs on its own, and the app talks to its
+HTTP API (`POST /v1/graphs/{graph}/query`, a bearer token, the `x-graph-namespace` header, one cell).
+
+- Claude sessions have the `graph_query` tool (the app's in-process MCP server, next to `message_agent`); every session, whatever its
+  provider, can run `node scripts/graph.ts "<cypher>" [--params '{"k":"v"}']`, and `node scripts/graph.ts status`. The briefing tells each
+  agent so, and to keep a `project` property on what it writes (they share one graph). Values go as parameters, never pasted into the query.
+- Settings: `data/weaiddb.json` (url, admin, tokenFile, namespace, graph, cell; defaults: a local development node,
+  `http://127.0.0.1:8443`, admin `:9090`). The token is the file the node was started with, `<home>/.jauvex/weaiddb/auth-token`; it is
+  read only to send it.
+- Running it: `scripts/weaiddb.ps1 setup | start | stop | status` clones the fork into `<home>/weaiddb`, builds the image with the fork's
+  own Dockerfile (the first build takes 15-30 minutes; later, only when the fork moved), and starts one plaintext node bound to 127.0.0.1,
+  its data and a random token in `<home>/.jauvex/weaiddb`. The Windows setup runs it when Docker Desktop is there (`JAUVEX_WEAIDDB=0` leaves
+  it out); Docker Desktop itself is the user's to install. Without Docker, build `graph-node` from source as the fork's README says.
+- Checks: `tests/graph.test.ts` (the request, the answers, the CLI, a node that is down, no token, on a stand-in node);
+  `.github/workflows/weaiddb.yml` builds the image from the fork on a Linux runner, starts it with `scripts/weaiddb.ps1`, and writes and
+  reads a small graph with `scripts/graph.ts`.
+
+## A browser agent for the agents (jev-ultrafast)
+
+[jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT, Browser Use with TypeSafe) drives a Chrome window toward one goal:
+every observation turns the page into a numbered table of elements, TypeSafe's Jev picks the operation (click, type, select, scroll,
+wait, done, blocked) and its target in one request, and a small LLM writes text only when the operation is typing. Every agent can hand
+it a task: Claude sessions with the `browse` tool, any session with `node scripts/browse.ts --url <https://...> --goal "<goal>"`, and the
+briefing says so (one narrow goal per run; check the last page it reports, since its DONE is a choice, not a proof). A run that
+ends on Chrome's own error page (no network, a certificate the browser does not trust) is a failure whatever it chose there: the
+page did not load, and the result says why (`net::ERR_...`); it once chose DONE on such a page after 0 steps.
+
+- It runs from its own clone (`<home>/jev-ultrafast`, or `JEV_ULTRAFAST_DIR`) and environment: `uv run --project <clone>` runs our
+  `scripts/browse_runner.py`, which uses its `Agent` and prints each step and the result as JSON lines; `shared/browse.ts` turns them into
+  what the agent reads (how it ended, each step, the last page and the elements on it). Nothing of it is copied here.
+- Keys: TypeSafe's is the app's own (TYPESAFE_API_KEY or `~/.typesafe/token`, read by `shared/typesafe.ts` and passed in the run's
+  environment only); the text model's (`TEXT_MODEL_API_KEY`, `TEXT_MODEL`, `TEXT_MODEL_BASE_URL`, an OpenRouter key in its example) is
+  in the clone's `.env`.
+- The browser (`ensureBrowser`): browser-harness only attaches to a browser already running, and the user's own Chrome takes it only
+  with `chrome://inspect`'s "Allow remote debugging" and a popup accepted every session (Chrome refuses a debugging port on its default
+  profile). So the agent gets a Chrome of its own, as browser-harness recommends: its own profile (`<home>/.jauvex/browser`, none of the
+  user's sign-ins; sign in there once where a task needs it), port 9333 on 127.0.0.1, started visibly on the first task and reused after.
+  Chrome, else Edge, else Chromium, where each system installs it (`CVC_CHROME_BIN` names another). `BU_CDP_URL` or `BU_CDP_WS`, when set,
+  name the browser instead; with no browser found, browser-harness looks for the user's own and says what it needs.
+- Checks: `tests/browse.test.ts` on stand-ins for uv and Chrome (`tests/mock/uv`, `tests/mock/chrome`). The real runner was also driven here, in jev-ultrafast's own uv
+  environment, against a local page in headless Chromium (`BU_CDP_URL`): it connected, read the page and asked TypeSafe, which refused
+  the placeholder key (a real run needs the user's keys). The same run through `ensureBrowser`, with a real Chromium (headless here: no
+  display) started on its own profile and port, got as far.
+
+## Paperclip beside the app
+
+[Paperclip](https://github.com/paperclipai/paperclip) (MIT) runs teams of AI agents like a company: goals, projects, issues, comments,
+approvals and budgets, on a dashboard. It runs on its own (`npx paperclipai onboard --yes`: trusted local mode on
+`http://127.0.0.1:3100`, its own embedded Postgres, Node 24.11 or newer), and nothing of it is copied here. On Windows the setup installs
+it once into `<home>/.jauvex/paperclip-cli` (pinned, about 1.5 GB, in the foreground: through npx in the background it was still
+installing, silent, after 12 minutes) and starts it from there with the Node it checked; from an elevated PowerShell as a basic user (`runas /trustlevel`), since its
+embedded PostgreSQL refuses to run with administrative rights. The sidebar's Paperclip item
+opens its dashboard in the right pane (or says how to start it), and this app's agents work with it:
+
+- `node scripts/paperclip.ts connect [--company "<name>"]`, once: this app joins that company (the only one, or the one named, made if
+  new) as an agent named Jauvex, paused so Paperclip never runs it itself (it has no command to run: a task assigned to it once ended in
+  a failed run, "Process adapter missing command"), and keeps the API key Paperclip issues in `<home>/.jauvex/paperclip/api-key`
+  (owner-only; sent, never printed). `status` says whether it runs and which company this app is in.
+- Claude sessions get Paperclip's own MCP server (`@paperclipai/mcp-server`, pinned) when Paperclip answers and the app is connected:
+  its read tools (list, get) pass, the ones that change anything ask the user first. Every session can run
+  `node scripts/paperclip.ts <GET|POST|PATCH|DELETE> /api/... [json]` (`{companyId}` is filled in).
+- Paperclip lets an agent open issues with its key, but a comment or a status change only inside a heartbeat run Paperclip started for
+  it (403 "Cross-issue writes need a run", 401 "Agent run id required"), even on its own issue. In trusted local mode a request without a
+  key is the board (the user), so `scripts/paperclip.ts` sends such a write again that way, the text marked `[from Jauvex]`, and says so.
+  The briefing tells the agents to post comments and status changes that way. (Paperclip waking this app's agents itself, as it does
+  its own adapters, is a larger piece not built here.)
+- Checks: `tests/paperclip.test.ts` on a stand-in Paperclip. The real one (2026.916.1) was installed here and driven: connect, reading
+  issues, opening one, a comment and a status change as the board, its MCP server's 44 tools with the kept key, its dashboard in the pane.
+
+The sidebar's **Browser agent** item opens jev-ultrafast's inspector (`uv run jev` in its folder: `http://127.0.0.1:8766`), which shows
+the elements it sees and its choices, step by step.
+
 ## Setting up on a fresh Mac
 
 Jauvex needs a few things that are not in this repository; the install command and `npm start` take care of most of them. The welcome screen (on the first start, and from Jauvex
@@ -41,6 +218,14 @@ settings after) checks each of them and tells you what is missing.
    itself: Anthropic does not let apps built on its Agent SDK offer the Claude.ai login. The welcome screen and the accounts
    panel (the Jauvex button below the sidebar) say who is signed in and give the command; with one signed in, the Jauvex
    agent can walk you through the other.
+3. **ZCode, optional**: a third provider (first cut). Build it from [github.com/zai-org/ZCode](https://github.com/zai-org/ZCode)
+   (`pnpm build:zcode`) and put its `zcode` on the PATH, then give it a model: `zcode login` for its own account, or a provider
+   with an API key in its settings (here ZCode runs on API-key providers only, see "How it is built"). The welcome screen and the
+   accounts panel count it as ready once the command answers and a new ZCode session would have a model to run on.
+3b. **Claw, optional**: a fourth provider, [claw-code](https://github.com/ultraworkers/claw-code) (MIT, a Rust agent harness on the
+   Anthropic API). Build it (`cargo build --release` in its `rust/`) and put its `claw` on the PATH; on Windows the setup script gets
+   a prebuilt `claw.exe` (below). It runs on an Anthropic API key, not a subscription: `ANTHROPIC_API_KEY` in the environment
+   (Windows: `setx ANTHROPIC_API_KEY sk-ant-...`, then start the app again). Ready once `claw --version` answers and its `doctor` sees the key.
 4. **whisper.cpp for the ears**: `npm start` installs it with Homebrew if it is missing and downloads the two models into
    `models/` (git-ignored): `ggml-small-q5_1.bin` for the transcript and `ggml-base-q5_1.bin` for the live words while you
    speak. Each is checked against the size and SHA-256 Hugging Face lists for it (`scripts/models.sh`): a download goes to a
@@ -114,7 +299,8 @@ your Mac from this source: `npm start` runs it from the Electron binary in `node
 - **The app's command line** (`node scripts/jauvex.ts <command>`, in the install folder): every action in the app, for
   agents, the Jauvex agent above all. `list` (folders, sessions, agents, ids), `add-folder`, `pick-folder` (the folder
   dialog for the user; what they choose is added), `new-agent` (provider, folder, name, purpose, first message; unnamed,
-  the provider is the Jauvex agent's own; with no first message it starts with its own introduction, since an agent exists
+  the provider is the Jauvex agent's own, or the one signed in, and the answer names it; a provider named and not signed in is refused
+  with how to sign in: it once answered "codex" and opened a Claude chat; with no first message it starts with its own introduction, since an agent exists
   once it has had one: on 2026-09-24 one ordered without it was an empty chat that vanished), `open` (a session, or the Jauvex agent), `send` (a message into a session),
   `rename`, `settings` (default agent, Jauvex row, welcome next time), `welcome`, `reload`, `restart`. It writes a
   request file in `data/commands/`, the running app does the thing and answers in a result file, the script prints the
@@ -300,6 +486,9 @@ Press the white round button in the message box. All local except the two Claude
   it works on any background); the last message rests just above it. The thread stays pinned to the bottom whatever
   grows (streamed text, a voice line being typed, a table rendering, the draft bubble, the orb appearing): only scrolling
   up lets go of the bottom.
+- **The orb without WebGL.** The orb is a WebGL shader (three.js). A browser that cannot make a WebGL context (a remote desktop,
+  a virtual machine, a PC without a GPU driver) once got a black window: the renderer threw and took the whole page with it. The
+  orb is then drawn flat, the disc and the mark standing still, and everything else works (`tests/window/no-webgl.test.ts`).
 - **Voice**: with no voice picked the app uses the system's default voice. (Samantha renders a line in a third of the
   time, 0.65 s against 1.9 s, but sounds robotic next to it; not worth it.) A half-finished thought is held 2.5 s for
   its second half, not 4.5.
@@ -315,7 +504,7 @@ Press the white round button in the message box. All local except the two Claude
   voice says it will wait ("Take your time.", "Okay, I'm here.") and the next thing said is a message as usual, whether
   the agent is idle or working (a pause is never steered into a turn). Jev tells a pause from "wait, make it blue" (a
   task) or "one second, what did you say?" (a question); without Jev only the bare phrase counts. Typed, "wait" is a
-  message like any other.
+  message like any other. In Korean too: "잠깐만", "잠시만요, 생각 좀 해볼게요", "기다려 줘" (and "잠깐, 파란색으로 바꿔" is a task).
 - **Preparing the reply.** When the agent's answer is in and the voice is putting its summary into words and rendering
   it, the orb and its label say so ("Preparing the reply"), so the pause before the voice speaks is not taken for silence.
 - **Goodbye.** "Bye", "good night", "talk to you later", "I'll be back": the voice answers in kind ("Good night, sleep
@@ -323,6 +512,10 @@ Press the white round button in the message box. All local except the two Claude
   passing ("add a goodbye message to the login page" is not one), and whether there is something to do first: "set an
   alarm for eight, then bye" goes to the main thread as a normal message, and the goodbye comes once that turn is over,
   after the summary. Without Jev, a short farewell counts by its words alone, a longer one is taken as having a task in it.
+  In Korean too: "잘 자", "안녕히 계세요", "이따 봐", "오늘은 여기까지 하자" (not "안녕" alone: it is also hello). Korean says in three
+  words what English says in seven, so without Jev a Korean goodbye is only a goodbye when nothing but goodbye, thanks and filler
+  is left ("커밋하고 잘 자" goes through first). Jev is told that wrapping up ("오늘은 여기까지 하자") is part of the goodbye, not a
+  task: it had read it as one at 0.5. The gates are in `shared/orders.ts`. The lines the voice says back stay English.
 - **Speaker** (voice settings): which output device the voice comes out of, with a Test line. A screen recorder or a
   virtual audio device can leave the system default somewhere you cannot hear; the audio context is also resumed
   before every line, because another app taking the audio can leave it suspended.
@@ -366,8 +559,8 @@ Press the white round button in the message box. All local except the two Claude
   Jev agent" are caught before anything reaches the main thread: the voice says what it is doing, the agent opens in the
   folder you named (or the open one), and voice mode carries on there. A cheap word gate runs first, so ordinary speech
   pays nothing; then Jev settles whether it was an order for the app or a coding request that merely mentions agents,
-  which kind was meant (it knows Whisper writes Claude as "Cloud", Codex as "codecs", Jev as "Jeff" or "Jet") and which
-  folder. Without Jev the voice model reads the same things in one line (the COMMAND job), and a kind only counts when one
+  which kind was meant (it knows Whisper writes Claude as "Cloud", Codex as "codecs", Jev as "Jeff" or "Jet"; Claw is one of
+  its answers since "open a new claw agent" opened Claude, 2026-09-27) and which folder. Without Jev the voice model reads the same things in one line (the COMMAND job), and a kind only counts when one
   was actually said. **The app carries an order out on its own only when it is sure** (`shared/orders.ts`): the exact phrase
   ("restart the app"), or Jev at 0.85 or more. When nobody is sure (Jev leaning, unsure or absent, the voice model reading an
   order) it asks in one short line, shown and said ("Should I open a new agent in website? Say yes to open it; anything
@@ -378,6 +571,11 @@ Press the white round button in the message box. All local except the two Claude
   sentence, and inside a longer message it is only acted on when Jev is sure it is for the app. "... named X" / "call it X"
   names the agent: a Jev agent at once, a Claude or Codex session when its first turn ends (it shows in the title bar
   from the start), written to the provider like any rename.
+  The gates (`shared/orders.ts`) know Korean too: "스크래치 폴더에 새 코덱스 에이전트 만들어줘", "새 클로드 에이전트 하나 열어줘",
+  "앱 재시작해" (the exact restart), "앱 좀 껐다 켜 줄래?" (a possible one, for Jev), "인터페이스 새로고침해줘", the kinds (클로드, 코덱스,
+  제트 코드, 클로, 제브), and the answers to the app's question (네 / 응 / 그래, 아니 / 취소). Until 2026-09-27 they were English words
+  only, and a Korean order went to the agent as a message. Jev reads the Korean as it is; names ("named X") are still read in English
+  and Spanish only.
   "... about X" / "for X" is what the agent is for. Jev only says *that* this is an order to open an agent; the details
   are language, so the session's own model reads the sentence once and returns them as JSON (kind, name written as a
   person would title it, purpose, folder), overriding what the rules found, and it also writes the new agent's first
@@ -409,10 +607,13 @@ Press the white round button in the message box. All local except the two Claude
   transcription pass costs by the length of the audio, and a paragraph re-transcribed at each pause took seconds a pass, so the words
   landed late and the thought was cut in two. The fullest text any pass of a stretch heard is remembered: a final pass that heard far fewer words (a 14 s pass once came back as "I" where earlier passes had heard two sentences) is retried once, and the fuller text wins. Whole transcripts Whisper invents from near-silence ("Thank you for your time.", "Thanks for watching") are dropped whatever their score. The audio of every pass stays in `data/voice-audio` (the newest 120 files, never sent anywhere), named in the recorder, so a lost sentence can be replayed. One speculative pass at a time: a pause while the previous pass still runs skips it, whether it was a question or a thank-you (answered at once with
   the voice answers in three stages: the quick line at once (Jev's fixed phrase, prepared during the pause), then the understanding (the voice model, told the quick line it comes after so it never repeats it, from the request and the last of the conversation: one or two sentences that reinforce what was said without parroting it; skipped for anything under five words, or once the turn is already over), then the summary of the answer when it lands), and queue / steer / stop / replace while the main thread is busy, with the spoken line
-  picked from a fixed set, in English, never the same line twice in a row. "Decisions" in the voice settings hands all of it back to the voice model. Below 0.6 confidence, in another language, over the 1.2 s budget, on any error, or with no key, the voice
+  picked from a fixed set, in the language it was said in (English or Korean), never the same line twice in a row. "Decisions" in the voice settings hands all of it back to the voice model. Below 0.6 confidence, in another language, over the 1.2 s budget, on any error, or with no key, the voice
   model decides as before. The key stays in the main process: never logged, never sent to the window. `CVC_JEV=off`
   switches it off. The voice settings say who is deciding.
-- **The fixed lines** (English only; a line is never said twice in a row): question "Let me check" / "Good question, one
+- **The fixed lines** (`shared/lines.ts`; in the language of what was just said: Korean when it has Hangul in it, English
+  otherwise; the voice model's own lines already follow the message's language. Until 2026-09-27 every fixed line was English,
+  and "잘 자" was answered "Good night, sleep well." For a Korean line to be pronounced, the spoken voice (the system's, see
+  rule 9 in AGENTS.md) must be one that speaks Korean; the welcome screen still speaks English. A line is never said twice in a row). In English: question "Let me check" / "Good question, one
   second" / "Let me look at that" / "One moment, checking"; task "Okay, one second" / "Sure, give me a moment" / "Got it,
   one moment" / "Sure, one moment"; thanks "Happy to help" / "Anytime" / "Glad you like it"; remark "Okay, one second" /
   "Mmm, let me think" / "Sure, give me a moment" (never a single word); while
@@ -509,7 +710,54 @@ Press the white round button in the message box. All local except the two Claude
   Same login, config and session store as the Codex CLI, nothing in `~/.codex` parsed by hand. The binary is the
   `@openai/codex` npm dependency; `codex app-server generate-ts --out <dir>` prints the protocol types for the
   installed version. One server process starts on first use and is shared by every Codex chat.
-- `electron/chat.ts` routes each turn by the session's provider; both providers send the UI the same `ChatEvent`s.
+- ZCode sessions (a third provider, first cut) come from **`zcode app-server`** (`electron/zcode.ts`): the ZCode Protocol that
+  ZCode's own desktop app runs its agent with ([github.com/zai-org/ZCode](https://github.com/zai-org/ZCode), read at v3.14.3), one JSON
+  object per line over stdio. `session/list` for the folder, `session/create` / `session/resume`, `session/subscribe` (the turn's events
+  only reach a subscribed client), `session/send`, `session/stop`, `session/compact`, `session/messages`, `session/read` (how full the
+  context is, read when a turn ends, for the meter), and the host's `interaction/requestPermission`, shown as the usual permission card.
+  Images go with the message the way ZCode's desktop sends them (`attachments`: kind, filename, mimeType, dataBase64) and come back
+  as images in the transcript. A rename is ZCode's own (v4 `renameSession`, a custom title its title generation then leaves alone), so
+  the ZCode app and CLI show the same name; the session is loaded first, since ZCode renames only a session it has open. Same config, providers and session store as the ZCode CLI
+  (`~/.zcode`), nothing there parsed by hand; the binary is the `zcode` on the PATH (`CVC_ZCODE_BIN` points elsewhere, the checks at
+  `tests/mock/zcode`). Its limits, as that protocol has them: no system prompt per session, so the app's briefing goes in front of a new
+  session's first message, marked, and is cut off again when the transcript is shown; `session/send` is refused during a turn, so what is
+  said or sent to a working ZCode agent goes as ZCode's v4 `sendText` command asking to be folded into the running turn (`guide`); ZCode
+  may queue it as a turn of its own after this one instead, and the chat then stays open until that turn is over too (text only: with
+  images, or when ZCode does not accept the command, it waits in the window's queue and goes, images and all, when the turn ends); the permission choice maps to ZCode's modes (ask: `build`; auto: `edit`,
+  which edits on its own and still asks before commands; ZCode's own `auto` refuses every tool and is never sent); models are ZCode's
+  default, or `provider/model` from its config; ZCode's account models need headers its desktop host supplies, so here it runs on
+  providers configured with an API key. The voice of a ZCode session is a ZCode model: `workspace/generateText`, one request with no
+  session, nothing kept in ZCode's history, the model picked in the voice settings (`provider/model`) or else the model of the last ZCode
+  session here (the protocol lists no models, so the choices are the ones ZCode sessions ran on here). The server runs its requests one at
+  a time, so a voice line asked during a turn holds a steer for as long as it takes. ZCode says its `session/*` methods go once its v4
+  protocol is the only one: that update moves this file to `v4/*`. The usage battery has no level for ZCode: API-key providers have no
+  plan limit, and a Coding Plan's quota comes from ZCode's account service, which only its desktop host reaches. It shows "no limit"
+  (∞), and its panel says in words what ZCode recorded of this Mac (`usage/stats`, the last 7 days): the tokens and turns, the model
+  used most, and today's tokens.
+  "Signed in" (the welcome's ZCode row, the accounts panel, the provider pickers) means ready: the `zcode` command answers and a new
+  session would have a model to run on. The app asks with a draft session (`persistence: deferred`: ZCode keeps nothing of it until a
+  first message, and none is sent) and closes it at once; ZCode's config and keys are never read. The row is optional, like Jev's. By
+  voice, ZCode is heard as "Z code", "zed code" or "zee code" (`agentKindSaid` in `shared/orders.ts`, also for "a new Z code agent");
+  `scripts/jauvex.ts` takes `--provider zcode` and refuses a provider it does not know. The checks never meet a real `zcode` on the PATH
+  (`tests/run.sh` points `CVC_ZCODE_BIN` nowhere unless a check names the stand-in). Checked in `tests/zcode-provider.test.ts`,
+  `tests/orders.test.ts` and `tests/welcome-intent.test.ts`.
+- Claw sessions (a fourth provider) run the **`claw` CLI** (`electron/claw.ts`; [claw-code](https://github.com/ultraworkers/claw-code),
+  MIT, read at 08106b0). claw has no server mode (no JSON-RPC; its `acp serve` only reports status) and its one-shot mode, the prompt on
+  stdin with `--output-format json`, starts a new claw session every run: `--resume` takes slash commands only and its interactive mode
+  needs a terminal. So a Claw session is the app's own: `data/claw/<id>.json` keeps its turns (the user's words, claw's answer, the tools
+  it ran with their results, tokens and claw's cost estimate), and every turn runs one claw in the session's folder with the app's
+  briefing and the conversation so far in front of the new message (`clawPrompt`: the newest turns up to about 60,000 characters, saying
+  how many older ones were left out). The files the agent changed are on disk as it left them; what it read in earlier turns comes back
+  only as those turns' summary. What that means: the answer lands whole when claw ends, with each tool call and its result; a message
+  sent during a turn waits for the next one (no steering); permissions are claw's modes, set per turn and never asked (ask:
+  `workspace-write`, edits inside the folder; auto: `danger-full-access`, commands too); the model is one of claw's aliases, Sonnet unless
+  another is chosen (claw's own default is Opus); images are not seen (claw takes text) and the window says so; there is nothing to
+  compact. Readiness is `claw --version` and claw's own `doctor` (its auth check reads that a key is there, never the key). The usage
+  panel shows the turns' tokens and cost from that record. The voice of a Claw session asks claw read-only, on Haiku unless another alias
+  is picked, one claw per question (slower to start than the other providers' voices). The stand-in is `tests/mock/claw` (`CVC_CLAW_BIN`);
+  `tests/claw-provider.test.ts` also runs the real binary when given one and claw's own `mock-anthropic-service` (`CVC_CLAW_REAL`,
+  `CVC_CLAW_MOCK_API`), which answers without a key.
+- `electron/chat.ts` routes each turn by the session's provider; every provider sends the UI the same `ChatEvent`s.
 - Two threads per chat. The main thread is the session itself (Claude or Codex, the model in the picker). The voice
   thread is a small model **from the same provider** (Haiku for Claude sessions; for Codex sessions the account's fast,
   affordable model, in a throwaway `ephemeral` thread with a read-only sandbox, so nothing lands in your Codex history;
