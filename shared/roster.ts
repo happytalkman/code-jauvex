@@ -38,3 +38,14 @@ export function newChatProvider(stored: string | null, signedIn: Record<Provider
   if (stored === 'zcode' || stored === 'claw') return stored;
   return signedIn.claude !== signedIn.codex ? (signedIn.claude ? 'claude' : 'codex') : stored === 'codex' ? 'codex' : 'claude';
 }
+/** The provider `new-agent` opens. One named by the caller and not signed in is refused with how to sign in: opening the chat anyway gave
+ * Claude when Codex was asked for (newChatProvider takes the one signed in) while the command answered "codex" (2026-09-27). None named:
+ * the default, or the one signed in, and the answer names the one the chat will run on. */
+export function newAgentProvider(provider: Provider, named: boolean, signedIn: Record<Provider, boolean>): { provider: Provider } | { error: string } {
+  if (!named) return { provider: newChatProvider(provider, signedIn) };
+  if (signedIn[provider] !== false) return { provider };
+  const how: Record<Provider, string> = { claude: 'Claude is not signed in on this computer: sign in with claude auth login (or the Accounts panel), then try again',
+    codex: 'Codex is not signed in on this computer: sign in with codex login, then try again', zcode: 'ZCode is not ready here: the zcode command or a model for it is missing (zcode login)',
+    claw: 'Claw is not ready here: the claw command or an Anthropic API key (ANTHROPIC_API_KEY) is missing' };
+  return { error: `${how[provider]}. Or ask for another provider.` };
+}

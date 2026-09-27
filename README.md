@@ -284,7 +284,8 @@ your Mac from this source: `npm start` runs it from the Electron binary in `node
 - **The app's command line** (`node scripts/jauvex.ts <command>`, in the install folder): every action in the app, for
   agents, the Jauvex agent above all. `list` (folders, sessions, agents, ids), `add-folder`, `pick-folder` (the folder
   dialog for the user; what they choose is added), `new-agent` (provider, folder, name, purpose, first message; unnamed,
-  the provider is the Jauvex agent's own; with no first message it starts with its own introduction, since an agent exists
+  the provider is the Jauvex agent's own, or the one signed in, and the answer names it; a provider named and not signed in is refused
+  with how to sign in: it once answered "codex" and opened a Claude chat; with no first message it starts with its own introduction, since an agent exists
   once it has had one: on 2026-09-24 one ordered without it was an empty chat that vanished), `open` (a session, or the Jauvex agent), `send` (a message into a session),
   `rename`, `settings` (default agent, Jauvex row, welcome next time), `welcome`, `reload`, `restart`. It writes a
   request file in `data/commands/`, the running app does the thing and answers in a result file, the script prints the
