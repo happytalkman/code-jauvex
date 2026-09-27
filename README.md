@@ -68,6 +68,14 @@ path (a browser has no folder dialog); images are attached with the paperclip, p
 one of this machine's own addresses is still refused (`allowedHost` in `shared/web.ts`), but the token travels in plain HTTP on that
 network: use a trusted one. Off by default.
 
+The phone's screen (`/mobile`, `web/src/Mobile.tsx`) is in the look of MARK Mobile (github.com/happytalkman/weaid-mobile-, a SwiftUI chat:
+a navy night, one cyan, "나" and the agent's name over rounded bubbles) and is run by this app: the menu lists the folders and their
+agents and opens a new one of any kind; every sentence is first read as a possible order for the app (a new agent, a pause, a goodbye,
+Korean too; a restart is refused there, since the phone could not start the server again), words said during a turn are triaged (steer,
+queue, stop, replace), Jev's quick line comes at once, tools ask with a card, and the answer is read aloud (the voice model's summary, else
+its first sentences, `shared/mobile.ts`). It listens and speaks with the phone's own browser speech (Korean by default; each line in its
+own language), not with Whisper on the computer.
+
 How it works: the server answers the window's calls by the same channel names as the desktop app's IPC (`POST /rpc`) and sends what the
 main process would send to the window as server-sent events (`GET /events`); the window gets its `window.desktop` from
 `web/src/webDesktop.ts` instead of the preload. `tests/web.test.ts` keeps the two in step: every channel of `electron/preload.ts` must have
